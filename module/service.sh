@@ -69,40 +69,73 @@ D2=$(getprop net.dns2 2>/dev/null)
 log "已写入 DNS: $(tr '\n' ' ' < "$ROOT/etc/resolv.conf" 2>/dev/null)"
 
 # ---------- 3.5) KernelSU 管理器注册（重要，必须每次开机做）----------
-# 现象：管理器 App 显示「不支持 | 未集成」＋「不支持非 GKI 内核」，
-#       但 ksud/su/模块其实都正常，内核侧也一切正常。
-# 实测原因：内核里的 manager appid 没有持久化，重启后回到未注册状态
-#       （证据：每次开机执行 set-manager 都打印 "4294967295 -> 10166"，
-#         而紧接着再执行一次就是 "10166 -> 10166"）。
-#       管理器没被内核认成"管理器"→ 拿不到 root → 查不到内核状态
-#       → 界面退化成那句误导性的「非 GKI」提示（跟 GKI 其实无关）。
-# 前提：内核 CONFIG_KSU_DEBUG=y（非 GKI 自编译内核一般都会开）。
-# 这里做两件事：开机补注册 + 失败重试（首次可能因应用数据目录未就绪而失败）。
-if command -v ksud >/dev/null 2>&1; then
-    MGR=""
-    for p in com.rifsxd.ksunext me.weishu.kernelsu; do
-        if [ -d "/data/app/$p-"* ] 2>/dev/null || ls -d /data/app/$p-* >/dev/null 2>&1; then
-            MGR="$p"; break
-        fi
-    done
-    if [ -n "$MGR" ]; then
-        i=0
-        while [ $i -lt 3 ]; do
-            OUT=$(ksud debug set-manager "$MGR" 2>&1)
-            log "KernelSU 管理器注册 [$MGR] 第 $((i+1)) 次: $OUT"
-            case "$OUT" in
-                *"-> "*)
-                    case "$OUT" in
-                        *"Error"*) i=$((i+1)); sleep 5; continue ;;
-                        *) break ;;
-                    esac
-                    ;;
-                *) break ;;
-            esac
-        done
-    else
-        log "未找到 KernelSU 管理器 App，跳过注册"
+# 现象：管理器 App 显示「不支持 | 未集成」＋「不支持非 GKI 内核」。
+# 实测根因（2026-09-20 从内核日志定位）：
+#   1) 内核只在开机早期由 throne_tracker 扫 /data/app 认领管理器一次。那次扫描
+#      实测会因 base.apk 打开失败的**瞬时**错误整体失败：
+#         KernelSU: Searching manager...
+#         KernelSU: open /data/app/com.rifsxd.ksunext-.../base.apk error.
+#         KernelSU: Search manager finished          <- 没人被认领
+#      之后不再自动补扫（本内核未编 KSU_LSM_HOOKS，开机完成事件补扫不触发），
+#      于是一直「不认识」管理器，直到装/卸任意应用触发包事件才会重扫。
+#   2) 内核旧逻辑还会在 packages.list 不完整时误判“管理器已卸载”并注销 appid，
+#      而且注销后当场不重扫（goto prune），同样要等下一次包事件才可能恢复。
+# 两头堵：
+#   内核侧：throne_tracker 补丁（坏行不截断 / 注销后立刻重扫 / 未认领则重试 30 次）
+#   用户态：这里把 appid 直接写内核参数，不依赖 ksud 二进制是否已就绪
+#           （ksu_debug_manager_appid 是带 setter 的 module_param，写入即生效）
+MGR_PKG=""
+for p in com.rifsxd.ksunext me.weishu.kernelsu org.matrix.vector.manager; do
+    if ls -d /data/app/$p-* >/dev/null 2>&1; then MGR_PKG="$p"; break; fi
+done
+KSUPARAM=/sys/module/kernelsu/parameters/ksu_debug_manager_appid
+
+ksu_mgr_appid() {
+    if command -v awk >/dev/null 2>&1; then
+        awk -v p="$MGR_PKG" '$1==p {print $2; exit}' /data/system/packages.list 2>/dev/null
+        return
     fi
+    while read -r _n _u _r; do
+        [ "$_n" = "$MGR_PKG" ] && { echo "$_u"; return; }
+    done < /data/system/packages.list
+}
+
+# 返回 0 表示内核已认出管理器
+ksu_mgr_set() {
+    A=$(ksu_mgr_appid)
+    [ -z "$A" ] && return 1
+    [ "$(cat "$KSUPARAM" 2>/dev/null)" = "$A" ] && return 0
+    [ -w "$KSUPARAM" ] && echo "$A" > "$KSUPARAM" 2>/dev/null
+    [ "$(cat "$KSUPARAM" 2>/dev/null)" = "$A" ] && return 0
+    if command -v ksud >/dev/null 2>&1; then
+        ksud debug set-manager "$MGR_PKG" >/dev/null 2>&1
+        [ "$(cat "$KSUPARAM" 2>/dev/null)" = "$A" ] && return 0
+    fi
+    return 1
+}
+
+if [ -n "$MGR_PKG" ]; then
+    if ksu_mgr_set; then
+        log "KernelSU 管理器已注册 [$MGR_PKG appid=$(ksu_mgr_appid)]"
+    else
+        log "KernelSU 管理器尚未生效（参数=$(cat $KSUPARAM 2>/dev/null)），转后台重试最多 2 分钟"
+        (
+            i=0
+            while [ $i -lt 24 ]; do
+                sleep 5
+                if ksu_mgr_set; then
+                    log "KernelSU 管理器注册成功（后台第 $((i+1)) 次）[$MGR_PKG appid=$(ksu_mgr_appid)]"
+                    break
+                fi
+                i=$((i+1))
+            done
+            if [ $i -ge 24 ]; then
+                log "KernelSU 管理器注册失败：$MGR_PKG appid=$(ksu_mgr_appid) 参数=$(cat $KSUPARAM 2>/dev/null)"
+            fi
+        ) &
+    fi
+else
+    log "未找到 KernelSU 管理器 App，跳过注册"
 fi
 
 # ---------- 4) 启动 chroot 内服务 ----------

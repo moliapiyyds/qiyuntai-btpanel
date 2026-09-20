@@ -157,45 +157,125 @@ usermod -aG inet mysql
 
 ---
 
-## 四、KernelSU：管理器显示「不支持 / 未集成」其实不是内核问题
+## 四、KernelSU：管理器显示「不支持 / 未集成」（2026-09-20 修正版结论）
 
 **症状**（管理器首页）：
+
 ```
 不支持 | 未集成
 不支持非 GKI 内核。请将 KernelSU-Next 传统驱动程序集成到您的内核中！
 管理器版本 v3.3.0 (33214-2)
 内核版本   4.9.148-...-Moli-KSUNext (aarch64)
 ```
-但此时 `su` 能用、`ksud` 能用、模块照常加载、dmesg 里 KSU 的 ioctl 正常。
 
-**实测原因（不是 GKI 的事）**：
-内核里的 **manager appid 没有持久化**，重启后回到「未注册」状态 → 内核不把管理器 App 当成"管理器"
-→ App 拿不到 root → 查不到内核状态 → 界面退化成那句误导性的「非 GKI」提示。
+此时 `su` 能用、`ksud` 能用、模块照常加载、dmesg 里 KSU 的 ioctl 正常。
 
-铁证就是 `set-manager` 的打印：**每次开机第一次执行都是 `4294967295 -> 10166`**
-（`4294967295 = 0xFFFFFFFF` = 未设置），紧接着再执行一次就变成 `10166 -> 10166`：
+> ⚠️ 本节早期版本把原因写成「内核不持久化 manager appid」，**那个判断不完整**。
+> 2026-09-20 抓到内核日志后修正如下：内核**每次开机都会自己扫一遍认领管理器**，
+> 只是那次扫描会失败，而失败后不会自动补扫。
+
+### 真正的原因（两条，都有内核日志）
+
+管理器由 `KernelSU/kernel/manager/throne_tracker.c` 认领：启动早期读
+`/data/system/packages.list` 建 uid 表，再遍历 `/data/app` 找签名匹配的 `base.apk`，
+命中即 `Crowning manager: <pkg>(uid=NNNNN)`，把 `ksu_manager_appid` 设为该 uid。
+
+**原因 1：那次扫描会因瞬时错误整体失败，而失败后不再补扫**
 
 ```
-[10:04:48] KernelSU 管理器注册: set manager appid: 4294967295 -> 10166   ← 开机，未注册
-[10:15:37] KernelSU 管理器注册: set manager appid: 4294967295 -> 10166   ← 又重启，还是未注册
-（手动再跑）                     set manager appid: 10166 -> 10166        ← 已注册
+# 成功的那次开机（dmesg.old.log）
+[ 29.71] PackageManager: KernelSU: Searching manager...
+[ 29.71] KernelSU: Found new base.apk at path: /data/app/com.rifsxd.ksunext-.../base.apk, is_manager: 1
+[ 29.71] KernelSU: Crowning manager: com.rifsxd.ksunext(uid=10166)
+[ 29.71] KernelSU: Search manager finished
+[ 37.58] ksud: ksu_manager_appid set to 10166
+
+# 失败的那次开机（dmesg.log）—— 同一个 APK，这次打不开
+[ 30.08] PackageManager: KernelSU: Searching manager...
+[ 30.08] KernelSU: open /data/app/com.rifsxd.ksunext-0YOQJR30e8CocabA90DtXQ==/base.apk error.
+[ 30.08] KernelSU: Found new base.apk at path: ..., is_manager: 0
+[ 30.17] KernelSU: Search manager finished          ← 没人被认领，就此结束
 ```
 
-**解决**（需要内核 `CONFIG_KSU_DEBUG=y`，非 GKI 自编译内核一般都会开）：
+原版重试策略是 `10 次 × 100ms`（约 1 秒）后放弃；本内核又没编 `KSU_LSM_HOOKS`，
+`on_boot_completed()` 里那次补扫触发不到 → **整轮开机都不会再认领**。
+
+**原因 2：误判「已卸载」后会注销 appid，而且注销后当场不重扫**
+
+```c
+if (!manager_exist) {                        // packages.list 里没找到管理器那一行
+    if (ksu_is_manager_appid_valid()) {
+        ksu_invalidate_manager_uid();        // 把已验证的 appid 清掉
+        goto prune;                          // ← 直接结束，不当场重扫
+    }
+    search_manager("/data/app", 2, &uid_list);
+}
+```
+
+`/data/system/packages.list` 是 Android 边装边重写的文件，扫描撞上重写中的半截内容
+就会「查无此行」→ 误判成"已卸载"→ 注销。注销之后**必须等下一次包安装/卸载事件**
+才会重新扫描 —— 这就是「**卸载一个应用就恢复**」的真实机制。
+
+### 修法（两头堵，均已落地）
+
+内核侧（`Moli-Kernel-PAR-AL00` 仓库的 `patches/0002-ksu-throne-tracker-manager-rescan-retry.patch`）：
+
+| 改动 | 说明 |
+| --- | --- |
+| 解析坏行不再 `break` | 原来一行异常就把整张 uid 表截断，改为跳过该行 `continue` |
+| 注销后立刻重扫 | 去掉 `goto prune`，注销后当场再搜一次，误判可自愈 |
+| 未认领则重试 | 搜完仍未认领 → 返回 false 走重试；预算 10×100ms → 30 次（前 10 次 100ms、之后 1s，约 20 秒窗口） |
+
+用户态兜底（本模块 `service.sh`）：直接写内核参数，**不依赖 ksud 二进制是否已就绪**
+（这次故障里 `ksud debug set-manager` 正是报 `No such file or directory` 才没兜住）：
+
 ```sh
-ksud debug set-manager com.rifsxd.ksunext      # 用管理器的包名
-# 之后管理器首页会变成：
-#   工作中 | BUILT-IN (LEGACY) | Version: v3.2.0-legacy (33193-2)
-#   超级用户 2 / 模块 9 / Hook 模式 Manual
+KSUPARAM=/sys/module/kernelsu/parameters/ksu_debug_manager_appid   # 带 setter 的 module_param，写入即生效
+A=$(awk '$1=="com.rifsxd.ksunext"{print $2; exit}' /data/system/packages.list)
+[ "$(cat $KSUPARAM)" = "$A" ] || echo "$A" > "$KSUPARAM"
 ```
 
-**必须每次开机都做**（因为内核不持久化），所以本项目的模块 `service.sh` 里内置了这一步，
-还带 3 次重试 —— 首次执行可能因为应用数据目录未就绪而失败（实测见过
-`Error: stat /data/data/com.rifsxd.ksunext`）。
+appid 从 `packages.list` 现取，所以**管理器重装/更新导致 uid 变化也不会失效**；
+未生效则转后台每 5 秒重试，最多 2 分钟。
 
-**顺带澄清几个容易误判的点**：
+### 快速判断当前状态
+
+```bash
+su -c 'cat /sys/module/kernelsu/parameters/ksu_debug_manager_appid'   # 应为管理器 uid，而不是 4294967295
+su -c 'grep ksunext /data/system/packages.list'                       # 对照这里的 uid
+su -c 'dmesg | grep -E "Crowning manager|base.apk error"'
+```
+
+### 顺带澄清（仍然成立）
+
 * 管理器版本(33214) 比内核版本(33193) 新，**不是**不支持的原因；两者用 uapi 通信，本例 uapi=2 一致。
-* `ksud debug info` 里看不到 manager 信息，别拿它当判据；要看就用 `set-manager` 的打印。
-* 这个提示跟"内核有没有 GKI"没关系，别被那句话带偏去刷内核。
+* `ksud debug info` 里看不到 manager 信息，别拿它当判据。
+* 这句提示跟"内核有没有 GKI"没关系，别被那句话带偏去刷 GKI 内核。
 
+---
 
+## 五、打开《王者荣耀》必自动重启 —— 内核 panic（`net_hw_hook_localout`）
+
+**症状**：打开王者荣耀 → 黑屏重启，`getprop sys.resettype` = `abnormal:AP_S_PANIC`，**可复现**。
+
+**一句话根因**：华为内核里 `drivers/huawei_platform/net/hw_netfilter/nf_hw_hook.S`
+（**编译器生成的汇编**，替代 `.c` 发布）硬编码了 `struct sock` 的字段偏移（`sk_socket` = 744）。
+自制内核打开了 `CONFIG_NAMESPACES`（连带 `CONFIG_NET_NS`），使 `possible_net_t skc_net`
+从 **0 字节变成 8 字节** → `struct sock` 内其后所有成员**整体后移 8 字节** →
+钩子读到的不再是 `sk_socket`，而是 `sk_tsflags`/`sk_shutdown`/填充字节，当作指针解引用即 panic。
+
+```
+PC is at net_hw_hook_localout+0x170/0x22c     x0 = 0x0000000000030000
+故障地址 00030018                              0x03 正是 sk_shutdown(SHUTDOWN_MASK) 那一字节
+调用链：tcp_write_timer → … → __tcp_retransmit_skb → __tcp_transmit_skb → 该钩子
+```
+
+**修法**：内核关掉 `CONFIG_NAMESPACES`（回到原厂 stock config 状态），并用编译探针断言
+`offsetof(struct sock, sk_socket)==744` 等 10 项与原厂布局完全一致才允许打包。
+实测刷入后打开王者荣耀不再重启，`/sys/fs/pstore` 为空。
+
+完整证据链（oops 原文、逐条指令偏移、两套配置的布局探针比对表、复现条件、回滚方式）见
+**`Moli-Kernel-PAR-AL00` 仓库的 `docs/panic-net_hw_hook_localout.md`**。
+
+**通用教训**：内核树里存在「编译器生成的 `.S`」时，config 中任何影响核心结构体布局的开关
+都不能随手打开 —— 偏移是编译期烘进二进制的，改 config 等于悄悄改变访存语义，**编译器不会报任何错**。
