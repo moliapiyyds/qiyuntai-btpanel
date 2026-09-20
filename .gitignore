@@ -1,0 +1,7 @@
+﻿# 备份/日志
+*.log
+*.bak
+backup_*/
+# Windows
+Thumbs.db
+desktop.ini
