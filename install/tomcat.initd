@@ -1,0 +1,30 @@
+#!/bin/sh
+# 茉莉定制：Tomcat 的 SysV 启动脚本（宝塔的 tomcat.sh 只装文件，jsvc 在 aarch64 上编译失败，
+# 所以这里直接用 catalina.sh 启停，并显式指定能用的 JDK）
+# chkconfig: 2345 90 10
+# description: Apache Tomcat
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export JAVA_HOME=/www/server/java/jdk-17.0.8
+export CATALINA_HOME=/www/server/tomcat
+export CATALINA_BASE=/www/server/tomcat
+[ -x "$JAVA_HOME/bin/java" ] || export JAVA_HOME=$(dirname $(dirname $(readlink -f /usr/bin/java 2>/dev/null)) 2>/dev/null)
+CT=$CATALINA_HOME/bin/catalina.sh
+
+running() { pgrep -f 'catalina.base=/www/server/tomcat' >/dev/null 2>&1; }
+
+case "$1" in
+  start)
+    if running; then echo "Tomcat 已在运行"; exit 0; fi
+    "$CT" start >/dev/null 2>&1
+    sleep 5
+    running && { echo "Tomcat 启动完成"; exit 0; } || { echo "Tomcat 启动失败"; exit 1; }
+    ;;
+  stop)
+    "$CT" stop >/dev/null 2>&1
+    sleep 2
+    pkill -f 'catalina.base=/www/server/tomcat' 2>/dev/null
+    echo "Tomcat 已停止"; exit 0 ;;
+  restart) "$0" stop; sleep 2; "$0" start ;;
+  status) running && { echo "Tomcat 正在运行"; exit 0; } || { echo "Tomcat 未运行"; exit 3; } ;;
+  *) echo "用法: $0 {start|stop|restart|status}"; exit 1 ;;
+esac
