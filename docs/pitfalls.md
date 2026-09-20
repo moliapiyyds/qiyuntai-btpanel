@@ -155,3 +155,47 @@ usermod -aG inet mysql
 ```
 `chown -R mysql:mysql /www/server/data` 后恢复正常（模块 `service.sh` 每次开机都会兜底 chown）。
 
+---
+
+## 四、KernelSU：管理器显示「不支持 / 未集成」其实不是内核问题
+
+**症状**（管理器首页）：
+```
+不支持 | 未集成
+不支持非 GKI 内核。请将 KernelSU-Next 传统驱动程序集成到您的内核中！
+管理器版本 v3.3.0 (33214-2)
+内核版本   4.9.148-...-Moli-KSUNext (aarch64)
+```
+但此时 `su` 能用、`ksud` 能用、模块照常加载、dmesg 里 KSU 的 ioctl 正常。
+
+**实测原因（不是 GKI 的事）**：
+内核里的 **manager appid 没有持久化**，重启后回到「未注册」状态 → 内核不把管理器 App 当成"管理器"
+→ App 拿不到 root → 查不到内核状态 → 界面退化成那句误导性的「非 GKI」提示。
+
+铁证就是 `set-manager` 的打印：**每次开机第一次执行都是 `4294967295 -> 10166`**
+（`4294967295 = 0xFFFFFFFF` = 未设置），紧接着再执行一次就变成 `10166 -> 10166`：
+
+```
+[10:04:48] KernelSU 管理器注册: set manager appid: 4294967295 -> 10166   ← 开机，未注册
+[10:15:37] KernelSU 管理器注册: set manager appid: 4294967295 -> 10166   ← 又重启，还是未注册
+（手动再跑）                     set manager appid: 10166 -> 10166        ← 已注册
+```
+
+**解决**（需要内核 `CONFIG_KSU_DEBUG=y`，非 GKI 自编译内核一般都会开）：
+```sh
+ksud debug set-manager com.rifsxd.ksunext      # 用管理器的包名
+# 之后管理器首页会变成：
+#   工作中 | BUILT-IN (LEGACY) | Version: v3.2.0-legacy (33193-2)
+#   超级用户 2 / 模块 9 / Hook 模式 Manual
+```
+
+**必须每次开机都做**（因为内核不持久化），所以本项目的模块 `service.sh` 里内置了这一步，
+还带 3 次重试 —— 首次执行可能因为应用数据目录未就绪而失败（实测见过
+`Error: stat /data/data/com.rifsxd.ksunext`）。
+
+**顺带澄清几个容易误判的点**：
+* 管理器版本(33214) 比内核版本(33193) 新，**不是**不支持的原因；两者用 uapi 通信，本例 uapi=2 一致。
+* `ksud debug info` 里看不到 manager 信息，别拿它当判据；要看就用 `set-manager` 的打印。
+* 这个提示跟"内核有没有 GKI"没关系，别被那句话带偏去刷内核。
+
+
