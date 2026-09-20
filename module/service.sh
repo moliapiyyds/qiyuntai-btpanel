@@ -68,21 +68,40 @@ D2=$(getprop net.dns2 2>/dev/null)
 } > "$ROOT/etc/resolv.conf" 2>/dev/null
 log "已写入 DNS: $(tr '\n' ' ' < "$ROOT/etc/resolv.conf" 2>/dev/null)"
 
-# ---------- 3.5) KernelSU 管理器注册（重要）----------
+# ---------- 3.5) KernelSU 管理器注册（重要，必须每次开机做）----------
 # 现象：管理器 App 显示「不支持 | 未集成」＋「不支持非 GKI 内核」，
-#       但 ksud/su/模块其实都正常。
-# 实测原因：内核里的 manager appid 是未设置状态（ksud debug info 看不到，
-#       set-manager 时打印 "4294967295 -> 10166" 即为证据），管理器拿不到 root
-#       → 查不到内核状态 → 退化成那句误导性的「非 GKI」提示。
-# 本机内核是 CONFIG_KSU_DEBUG=y 的 non-GKI(legacy) 自编译内核，所以这里开机补注册。
+#       但 ksud/su/模块其实都正常，内核侧也一切正常。
+# 实测原因：内核里的 manager appid 没有持久化，重启后回到未注册状态
+#       （证据：每次开机执行 set-manager 都打印 "4294967295 -> 10166"，
+#         而紧接着再执行一次就是 "10166 -> 10166"）。
+#       管理器没被内核认成"管理器"→ 拿不到 root → 查不到内核状态
+#       → 界面退化成那句误导性的「非 GKI」提示（跟 GKI 其实无关）。
+# 前提：内核 CONFIG_KSU_DEBUG=y（非 GKI 自编译内核一般都会开）。
+# 这里做两件事：开机补注册 + 失败重试（首次可能因应用数据目录未就绪而失败）。
 if command -v ksud >/dev/null 2>&1; then
-    if [ -d /data/app/com.rifsxd.ksunext-* ] || [ -d /data/app/me.weishu.kernelsu-* ]; then
-        MGR=""
-        [ -d /data/app/com.rifsxd.ksunext-* ] && MGR="com.rifsxd.ksunext"
-        if [ -n "$MGR" ]; then
-            OUT=$(ksud debug set-manager "$MGR" 2>&1)
-            log "KernelSU 管理器注册 [$MGR]: $OUT"
+    MGR=""
+    for p in com.rifsxd.ksunext me.weishu.kernelsu; do
+        if [ -d "/data/app/$p-"* ] 2>/dev/null || ls -d /data/app/$p-* >/dev/null 2>&1; then
+            MGR="$p"; break
         fi
+    done
+    if [ -n "$MGR" ]; then
+        i=0
+        while [ $i -lt 3 ]; do
+            OUT=$(ksud debug set-manager "$MGR" 2>&1)
+            log "KernelSU 管理器注册 [$MGR] 第 $((i+1)) 次: $OUT"
+            case "$OUT" in
+                *"-> "*)
+                    case "$OUT" in
+                        *"Error"*) i=$((i+1)); sleep 5; continue ;;
+                        *) break ;;
+                    esac
+                    ;;
+                *) break ;;
+            esac
+        done
+    else
+        log "未找到 KernelSU 管理器 App，跳过注册"
     fi
 fi
 
