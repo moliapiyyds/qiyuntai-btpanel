@@ -1,0 +1,64 @@
+#!/bin/sh
+# 茉莉定制：crond 的 SysV 启动脚本（openEuler 只带了 /usr/sbin/crond，没有 init 脚本）
+# chkconfig: 2345 90 10
+# description: cron 计划任务守护进程（宝塔面板的「计划任务」依赖它）
+#
+# 重要（踩坑）：
+# 1) chroot 的 /var/run 落在 /data 上，重启不清空，pid 文件可能是上次开机遗留的
+#    陈旧文件 → 只看 pid 会误判。
+# 2) 不能用 /proc/<pid>/comm 判断：Linux 里 `#!` 脚本进程的 comm 就是脚本名，
+#    也就是说「正在执行 /etc/init.d/crond start 的这个 shell」comm 也叫 crond，
+#    会把脚本自己当成守护进程（而且 kill 时可能杀掉调用者）。
+#    所以统一用 readlink /proc/<pid>/exe 判断，真守护进程的 exe 是 $CROND。
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CROND=/usr/sbin/crond
+PID=/var/run/crond.pid
+
+is_crond() {
+    [ -n "$1" ] && [ "$(readlink /proc/$1/exe 2>/dev/null)" = "$CROND" ]
+}
+
+running() {
+    if [ -f "$PID" ]; then
+        is_crond "$(cat $PID 2>/dev/null)" && return 0
+    fi
+    for p in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+        is_crond "$p" && return 0
+    done
+    return 1
+}
+
+start() {
+    if running; then echo "crond 已在运行"; return 0; fi
+    rm -f "$PID"
+    mkdir -p /var/spool/cron /var/run /var/log
+    touch /var/spool/cron/root 2>/dev/null
+    [ -x "$CROND" ] || { echo "找不到 $CROND"; return 1; }
+    "$CROND" -s
+    sleep 1
+    if running; then echo "crond 启动完成"; return 0; fi
+    echo "crond 启动失败"; return 1
+}
+
+stop() {
+    if [ -f "$PID" ]; then
+        p=$(cat "$PID" 2>/dev/null)
+        is_crond "$p" && kill "$p" 2>/dev/null
+        sleep 1
+    fi
+    for p in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do
+        is_crond "$p" && kill "$p" 2>/dev/null
+    done
+    rm -f "$PID"
+    echo "crond 已停止"
+    return 0
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart|force-reload) stop; sleep 1; start ;;
+    reload) for p in $(ls /proc 2>/dev/null | grep -E '^[0-9]+$'); do is_crond "$p" && kill -HUP "$p"; done; echo "crond 已重载" ;;
+    status) running && { echo "crond 正在运行"; exit 0; } || { echo "crond 未运行"; exit 3; } ;;
+    *) echo "用法: $0 {start|stop|restart|reload|status}"; exit 1 ;;
+esac
