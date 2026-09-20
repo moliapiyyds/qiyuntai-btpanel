@@ -113,7 +113,7 @@ chmod 755 /data/adb/modules/qiyuntai_btpanel/*.sh
 1. **arm64 (aarch64) 设备** —— 根文件系统就是 aarch64 的 openEuler；32 位设备、x86 平板不适用。
 2. **已 root，且装了 KernelSU 或 Magisk** —— 模块靠 `/data/adb/modules/<id>/service.sh` 在开机后跑脚本。
    * KernelSU-Next 官方只发 GKI 内核的 `.ko`；非 GKI 老内核（如 4.9/4.14）需要**自己编译带传统驱动（manual hook）的内核**。
-   * 有些设备 KernelSU 管理器显示"不支持/未集成"其实是**管理器没在内核里注册**，`ksud debug set-manager <包名>` 就能修（需要 `CONFIG_KSU_DEBUG=y`）。
+   * **管理器首页显示「不支持 / 未集成」「不支持非 GKI 内核」时，先别急着刷内核** —— 实测这是**管理器没在内核里注册**（内核不持久化 manager appid，重启后回到未注册）：App 拿不到 root → 查不到内核状态 → 界面就退化成那句误导性提示。修法 `ksud debug set-manager com.rifsxd.ksunext`（需内核 `CONFIG_KSU_DEBUG=y`）。**本模块 `service.sh` 已内置这一步（带 3 次重试），每次开机会自动注册**；完整排查证据见 `docs/pitfalls.md` 第四节。
 3. **内核支持 mount / chroot / proc / sysfs / devpts / tmpfs** —— Android 4.4+ 基本都满足；需要能 `mount --bind`，部分 OEM 的 SELinux 策略更严格时可能要放宽策略。
 
 **Android 版本**：9 ~ 16 在原理上都能跑（本项目在 Android 9 / 内核 4.9.148 上完整实测），因为用到的都是 Linux 层能力，不依赖 Android 版本：
