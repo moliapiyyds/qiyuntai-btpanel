@@ -200,8 +200,8 @@ sh install/deploy.sh --from-image /sdcard/qyt_image
 ### 只想装 / 更新模块（环境已经好了）
 
 ```powershell
-adb push qiyuntai_btpanel-v1.2.3.zip /sdcard/
-adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.3.zip'"
+adb push qiyuntai_btpanel-v1.2.4.zip /sdcard/
+adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.4.zip'"
 ```
 
 * `ksud` 的真实路径是 **`/data/adb/ksud`**（不在 `PATH` 里）
@@ -313,7 +313,8 @@ tools/                   辅助脚本
 docs/                    说明与记录
   handover.md             交付说明（含版本复核记录）
   pitfalls.md             踩坑记录（全部为实测结论）
-  release-notes-v1.2.3.md 该版本的 Release 说明
+  release-notes-v1.2.4.md 当前版本的 Release 说明
+  release-notes-v1.2.3.md 上一版（历史保留）
   private-deployment.md   本机真实地址与口令（已 gitignore，不进仓库）
 
 CHANGELOG.md              更新日志

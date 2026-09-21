@@ -67,7 +67,7 @@
 ```
 id            qiyuntai_btpanel
 name          栖云台·宝塔面板
-版本          v1.2.3   (versionCode 10203)
+版本          v1.2.4   (versionCode 10204)
 作者          茉莉 QQ:1265274322  官方Q群:570387739
 目录          /data/adb/modules/qiyuntai_btpanel/
 日志          /data/adb/modules/qiyuntai_btpanel/boot.log
@@ -166,7 +166,7 @@ git add -A && git commit -m "..." && git push origin main
 
 # 只改了 module/ 里的东西时，必须重打 zip 并覆盖 Release 附件
 bash tools/build_module_zip.sh
-gh release upload v1.2.3 _dist/qiyuntai_btpanel-v1.2.3.zip --clobber
+gh release upload v1.2.4 _dist/qiyuntai_btpanel-v1.2.4.zip --clobber
 
 # 检查本地和远端有没有漏推
 bash tools/verify_sync.sh

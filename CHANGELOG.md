@@ -6,7 +6,16 @@
 
 ---
 
-## 未发布（相对 v1.2.3）
+## v1.2.4 — 2026-09-21
+
+`versionCode = 10204`
+
+模块内容（`module/action.sh`、`module/uninstall.sh`、`module/README.md`）有改动，
+所以升到 v1.2.4。**建议所有已装用户更新模块**：这一版修了 `action.sh` 的磁盘诊断
+（原来因 `df` 取值方式在本机拿不到值，一直显示为空）、给 `uninstall.sh` 加了
+`--purge` 安全开关、并把 `module/README.md` 与实际代码对齐（开机流程 11 项、9 个插件）。
+
+> 下面这些条目相对 v1.2.3 的增量。
 
 ### 一键部署
 
