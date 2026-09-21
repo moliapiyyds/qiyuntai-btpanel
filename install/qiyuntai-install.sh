@@ -3,25 +3,31 @@
 # 栖云台 · 宝塔面板 —— 一键部署脚本（在手机 root shell 里执行）
 # 作者：茉莉  QQ:1265274322  官方Q群:570387739
 # ============================================================
-# 做的事：
-#   1) 下载 openEuler 24.03 LTS-SP3 aarch64 rootfs（清华镜像）
-#   2) 解出文件系统到 /data/openeuler
-#   3) 挂载 chroot 的 /dev /dev/pts /dev/shm /proc /sys
-#   4) chroot 内 dnf 预装编译依赖 + 创建 www 用户 + 打 bt_lib 锁
-#   5) 用宝塔官方 install_panel.sh 安装面板
-#   6) 装组件：OpenResty(nginx) / MariaDB / PHP8.2 / phpMyAdmin5.2 / Fail2ban
-#   7) 打面板改造补丁（永久企业版 / 关闭更新 / 免绑定）+ 服务兼容层
-#   8) 安装 KernelSU 模块
+# 做的事（步骤名就是下面 case 里的名字，可以单独跑某一步）：
+#   rootfs     铺 openEuler 24.03 LTS-SP3 aarch64 rootfs（默认走镜像站；
+#              也可以用 deploy.sh --from-image 从预制镜像解包，那就跳过这一步）
+#   mount      挂载 chroot 的 /dev /dev/pts /dev/shm /proc /sys + 写 DNS / hostname
+#   deps       chroot 内 dnf 装编译依赖与运行时包 + 建 www 用户 + 打 bt_lib 锁
+#   panel      用宝塔官方安装器装面板（installer.lock 锁 sha256，expect 驱动交互）
+#   creds      生成 16 位随机面板密码并写凭据文件（来自镜像时还会重随机化端口/入口/用户名/主机密钥）
+#   components 装组件：OpenResty / MariaDB 10.11 / PHP 8.2 / phpMyAdmin
+#   plugins    装 9 个宝塔插件 + 从宝塔源码包编 memcached 1.6.45
+#   parity     按 install/baseline-packages.txt（548 条基线 rpm）逐包名对齐
+#   patch      打面板改造补丁 + 关掉面板自动 SSL + 装服务兼容层
+#              + 装仓库自备的 crond/tomcat/memcached init 脚本 + sshd 配置
+#   module     安装 KernelSU 模块到 /data/adb/modules/qiyuntai_btpanel
 #
 # 用法：
-#   sh qiyuntai-install.sh              # 全流程
+#   sh qiyuntai-install.sh              # 全流程（= all）
 #   sh qiyuntai-install.sh panel        # 只装面板
 #   sh qiyuntai-install.sh components   # 只装组件
-#   sh qiyuntai-install.sh patch        # 只打补丁 + 兼容层
+#   sh qiyuntai-install.sh patch        # 只打补丁 + 兼容层 + 自备文件
 #   sh qiyuntai-install.sh module       # 只装模块
+#   （可选：rootfs / mount / deps / creds / plugins / parity）
 #
 # 注意：本脚本会写 /data/openeuler 与 /data/adb/modules，不会动系统分区。
-#       全程无 rm -rf，卸载模块也只解挂载。
+#       本脚本自身不含 rm -rf；删除环境只有一条路：
+#       install/prepare-rootfs.sh --clean（先解挂载、断言干净、才删）。
 # ============================================================
 
 set -u
@@ -35,6 +41,10 @@ CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bi
 STEP="${1:-all}"
 
 log()  { echo "[栖云台] $*"; }
+# warn 是后来加警告时才开始用的，但一开始忘了定义 —— 结果是 18 处警告全都变成
+# `sh: warn: not found` 打不出来（2026-09-22 核对时才发现）。警告走 stderr，
+# 这样和正常输出能分开，日志里也搜得到「注意」。
+warn() { echo "[栖云台][注意] $*" >&2; }
 fail() { echo "[栖云台][失败] $*"; exit 1; }
 
 in_chroot() { chroot "$ROOT" /usr/bin/env -i $CHENV /bin/bash -c "$1"; }
