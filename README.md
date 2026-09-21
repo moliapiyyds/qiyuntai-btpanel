@@ -12,6 +12,31 @@
 
 ---
 
+## 一键部署（复制即用）
+
+**在电脑上执行**（需要 `adb` + 能连 GitHub；手机 arm64、已 root、`/data` 空闲 ≥ 8-10 GB）：
+
+```powershell
+git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
+cd qiyuntai-btpanel
+.\deploy.ps1
+```
+
+不想 clone 的，**一行**（下载 zip → 解包 → 直接跑）：
+
+```powershell
+$d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
+```
+
+剩下的全自动：找 adb → 等设备 → 探 root → 推 `install/` + `module/` → 手机上铺 rootfs
+→ 装面板/组件/插件/打补丁 → 装 KernelSU 模块 → **自动重启**。
+重启后点模块的「执行」按钮，地址和账号密码会直接打印出来。
+
+> 耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**）。
+> 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb`）、分步部署、纯手机侧自举 → 见「三、部署」。
+
+---
+
 ## 一、这套东西是什么
 
 | 层 | 内容 |

@@ -41,6 +41,9 @@ $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:SU = ''
 
+# 自引用提示：从别的目录调用（例如 %TEMP%）时，要给能直接复制的完整路径
+$hint = if ((Get-Location).Path.TrimEnd('\') -eq $RepoRoot.TrimEnd('\')) { '.\deploy.ps1' } else { "& `"$RepoRoot\deploy.ps1`"" }
+
 function Say($m)  { Write-Host "  $m" }
 function Ok($m)   { Write-Host "  [OK]   $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  [警告] $m" -ForegroundColor Yellow }
@@ -129,7 +132,7 @@ if ($freeLine) { Ok "磁盘: $($freeLine.Trim())" }
 if ($Check) {
     Write-Host ""
     Write-Host "---- -Check 结束，什么都没推送 / 安装 ----"
-    Write-Host "正式部署： .\deploy.ps1"
+    Write-Host "正式部署： $hint"
     exit 0
 }
 
@@ -151,7 +154,7 @@ if ($PushOnly) {
     Write-Host "---- -PushOnly：文件已推好，没有安装 ----"
     Write-Host "继续（手机上执行）："
     Write-Host "   $Adb -s $serial shell `"sh /sdcard/install/deploy.sh`""
-    Write-Host "或者在这里直接跑： .\deploy.ps1"
+    Write-Host "或者在这里直接跑： $hint"
     exit 0
 }
 

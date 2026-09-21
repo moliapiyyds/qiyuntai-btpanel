@@ -6,6 +6,31 @@
 
 ---
 
+## 未发布（相对 v1.2.3）
+
+### 一键部署
+
+* **新增 PC 侧 `deploy.ps1`** —— 在电脑上一条命令跑完：找 adb → 等设备 → 探 root
+  （实测 KernelSU-Next 的 adbd 常常本身就是 root，这时设备上根本没有 `su` 命令，所以先探再决定加不加 `su -c`）
+  → 推 `install/` + `module/` → 在手机上执行 `install/deploy.sh`。
+  参数 `-Check` / `-PushOnly` / `-NoReboot` / `-Adb <路径>`。
+  **必须存成 UTF-8 带 BOM**：实测 PowerShell 5.1 会把无 BOM 的 UTF-8 当 GBK 解析，
+  中文被拆坏后撞上字符串终止符和保留的 `<` 运算符，直接语法报错。
+* **新增手机侧 `install/deploy.sh`（自举）** —— 前置检查（root / aarch64 / 磁盘 / 工具 / SELinux）
+  → 本地没有完整仓库就自己从 GitHub 拉 main 并解包 → 铺 openEuler rootfs
+  → 装面板/组件/插件/打补丁 → 装 KernelSU 模块 → 打印凭据并重启。
+  参数 `--check` / `--repo-only` / `--repo-tar` / `--url` / `--tar` / `--no-reboot`。
+* **README 首页把一键命令提到最前面** —— 原来埋在「三、部署」里，要滚过两节才看得到。
+
+### 文档
+
+* `docs/pitfalls.md` 补「面板反爬虫 UA 分界线」实测：`is_spider()` 命中时返回伪装成
+  `Server: nginx` 的 404，**且不写请求日志**，极易误判成面板故障；同时理清另外两个会
+  输出同一个 404 页的来源（安全入口下非入口路径、未登录走 `error_not_login()`）。
+* 组件版本按实测复核并改正（Fail2ban 上游版本、Node、JDK 等），修正章节编号。
+
+---
+
 ## v1.2.3 — 2026-09-20
 
 `versionCode = 10203`
