@@ -43,6 +43,14 @@
 * `prepare-rootfs.sh` 的 `STAGE` 是死变量（只赋值、全文件无引用）。
 * `tomcat.initd` 的 `JAVA_HOME` 回退写法把 `$(...)` 全裸着（4 条 shellcheck 告警），已改写。
 * `step_plugins` 里只有一个元素的 `for` 循环，改成直接 `cp`。
+* **磁盘空间检查实测从来没生效过**：`df -k /data` 在本机的输出会因为设备名过长**折成三行**
+  （第 2 行只有 `/dev/block/by-name/userdata`，数值在第 3 行），于是
+  `awk 'NR==2{print $4}'` 取到空值 → `[ -n "$FREE_KB" ]` 为假 → 整个检查被静默跳过。
+  `prepare-rootfs.sh` 里更糟：`[ "" -lt N ]` 会报 `integer expression expected` 并让检查失效；
+  `action.sh` 的诊断行则显示为空。三处全改成 `df -P`（POSIX 输出，强制一个文件系统一行，
+  实测 busybox 与 toybox 都支持），并且**取不到数值就直接失败**，不再「跳过检查」。
+* `deploy.sh` 的空间门槛是 **6 GB**，而实测装完需要 **17.7 GB** —— 差 3 倍，
+  空间不够的机器会一路过检查、装到一半爆在 `/data`。已按 20 GB 设门槛。
 
 ### CI
 

@@ -180,13 +180,14 @@ diag() {
 
     echo ""
     echo "---- 7) 磁盘占用 ----"
-    echo "  /data 挂载点剩余：$(df -h /data 2>/dev/null | awk 'NR==2{print $4" / "$2" ("$5")"}')"
+    # df -P：本机 df 输出会因设备名过长折行，NR==2 取不到数据（实测踩过）
+    echo "  /data 挂载点剩余：$(df -P -h /data 2>/dev/null | awk 'NR==2{print $4" / "$2" ("$5")"}')"
     if [ "$DIAG_DU" = "1" ]; then
         echo "  正在算 $ROOT 占用（大目录会慢十几秒）…"
         SZ=$(du -sh "$ROOT" 2>/dev/null | awk '{print $1}')
         echo "  $ROOT 占用：${SZ:-未知}"
     else
-        echo "  $ROOT 占用：设 DIAG_DU=1 再跑一次可统计（4-6 GB，会慢）"
+        echo "  $ROOT 占用：设 DIAG_DU=1 再跑一次可统计（约 17.7 GB，会慢）"
     fi
 
     echo ""

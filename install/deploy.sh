@@ -109,9 +109,21 @@ case "$ARCH" in
     *) die "只支持 aarch64（当前 $ARCH）；32 位设备与 x86 平板不适用" ;;
 esac
 
-FREE_KB=$(df -k /data 2>/dev/null | awk 'NR==2{print $4}')
-if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt 6291456 ]; then
-    die "/data 只剩 $((FREE_KB / 1024)) MB，不够（装完组件约 4-6 GB，建议 ≥ 10 GB）"
+# 必须用 df -P：实测本机 df -k /data 的输出会因为设备名过长折成三行
+#   Filesystem / 1K-blocks Used Available Use% Mounted on
+#   /dev/block/by-name/userdata              <- 第2行只有设备名
+#                        117766144 ... /data  <- 第3行才是数值
+# 于是 awk 'NR==2{print $4}' 拿到空值，[ -n "$FREE_KB" ] 为假，
+# 整个磁盘检查被静默跳过（实测踩过）。拿不到数值就失败，不再「跳过检查」。
+FREE_KB=$(df -P -k /data 2>/dev/null | awk 'NR==2{print $4}')
+case "$FREE_KB" in
+    ''|*[!0-9]*) die "取不到 /data 可用空间（df -P -k /data 输出异常：[$FREE_KB]），不敢继续" ;;
+esac
+# 实测装完占 /data/openeuler 约 17.7 GB，其中 MariaDB 编译构建树
+# www/server/mysql/src 就占 8.8 GB。门槛按 20 GB 设（原来写 6 GB，差 3 倍）。
+NEED_KB=20971520
+if [ "$FREE_KB" -lt "$NEED_KB" ]; then
+    die "/data 只剩 $((FREE_KB / 1024)) MB，不够：实测装完约 17.7 GB，建议先清到 ≥ $((NEED_KB / 1024)) MB 再跑。"
 fi
 ok "/data 可用 $((FREE_KB / 1024)) MB"
 

@@ -196,14 +196,21 @@ fi
 # ---------- 空间检查 ----------
 echo ""
 echo "---- 空间检查 ----"
-AVAIL_KB=$(df -k /data 2>/dev/null | awk 'NR==2{print $4}')
+# 必须用 df -P：本机 df -k /data 会因设备名过长折成三行，NR==2 取到空值，
+# 后面 [ "" -lt N ] 会报 integer expression expected 并让检查失效（实测踩过）。
+AVAIL_KB=$(df -P -k /data 2>/dev/null | awk 'NR==2{print $4}')
+case "$AVAIL_KB" in
+    ''|*[!0-9]*) die "取不到 /data 可用空间（df -P -k /data 输出异常：[$AVAIL_KB]）" ;;
+esac
 TAR_KB=$(( $(wc -c < "$SRC_TAR" 2>/dev/null || echo 0) / 1024 ))
 say "docker tar：$((TAR_KB / 1024)) MB     /data 可用：$((AVAIL_KB / 1024)) MB"
-# 解压后约为 tar 的 2.5 倍（layer + 合并后的 rootfs）
+# 解压后约为 tar 的 2.5 倍（layer + 合并后的 rootfs）。
+# 注意这里只管 rootfs 那一步：全部装完后 /data/openeuler 实测约 17.7 GB，
+# 整体门槛由 install/deploy.sh 的前置检查按 20 GB 把关。
 NEED_KB=$(( TAR_KB * 25 / 10 ))
 if [ "$AVAIL_KB" -lt "$NEED_KB" ]; then
-    die "空间可能不够：预计需要 $((NEED_KB / 1024)) MB，/data 只剩 $((AVAIL_KB / 1024)) MB。
-     装完面板与组件后 /data/openeuler 通常到 4-6 GB，建议留足 10 GB。"
+    die "空间可能不够：这一步预计需要 $((NEED_KB / 1024)) MB，/data 只剩 $((AVAIL_KB / 1024)) MB。
+     提醒：全部装完后 /data/openeuler 实测约 17.7 GB，整体建议留足 20 GB。"
 fi
 say "空间够用"
 
