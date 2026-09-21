@@ -124,7 +124,7 @@ step_deps() {
       oniguruma oniguruma-devel libwebp libwebp-devel libvpx libvpx-devel libsodium libsodium-devel \
       glib2 glib2-devel libstdc++ libstdc++-devel perl perl-devel perl-Data-Dumper \
       vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel \
-      expect openssh-server openssh-clients'
+      expect openssh-server openssh-clients nodejs npm'
     # 运行时组件（不是编译依赖）：这里只留 redis 当兜底。
     # 注意版本差异（实测）：openEuler 源里是 redis 7.2.15 / memcached 1.6.22，
     # 而基线记的是 redis 7.2.16 / memcached 1.6.45 —— 基线那两份都是宝塔自带的
@@ -432,6 +432,17 @@ step_patch() {
     log "打面板改造补丁（永久企业版 / 关闭更新 / 免绑定）"
     cp -f "$REPO_DIR/tools/moli_patch.py" "$ROOT/tmp/moli_patch.py"
     in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/moli_patch.py'
+    # 打完立刻复核一遍：verify 会把「没生效」的条目逐条列出来。
+    # 为什么必须做（2026-09-22 实测）：补丁的前端那几步要用 node --check 校验 JS，
+    # 环境里还没有 node 时旧版会直接 traceback 中断 —— 后端的几条已经打上了、
+    # 前端的几条一条没做，日志里只有一段调用栈，很容易被当成「补丁打完了」。
+    # 这里不 fail（前端条目不影响后端功能），但一定要把「没生效」喊出来。
+    local vout
+    vout=$(in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/moli_patch.py verify' 2>&1 | tr -d '\r')
+    printf '%s\n' "$vout" | sed 's/^/    /'
+    if printf '%s' "$vout" | grep -q '未生效'; then
+        warn "补丁有没生效的条目（见上）。装了 nodejs 再跑一次 patch 步骤即可补齐（幂等）"
+    fi
     log "装 chroot 服务兼容层（systemctl/service/start-stop-daemon/iptables-legacy）"
     sh "$REPO_DIR/install/chroot-compat-layer.sh"
     log "Android paranoid-network 修正（MariaDB 监听 3306 必需）"

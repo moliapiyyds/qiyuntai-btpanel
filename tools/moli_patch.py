@@ -163,10 +163,32 @@ def py_ok_text(content):
     return py_ok_path(tmp)
 
 
+def find_node():
+    """找 JS 语法校验用的 node。
+    为什么要有这个函数（2026-09-22 实测踩到）：新装环境里 /usr/bin/node 是**后面那步才装的**
+    （依赖对齐/插件那步装 nodejs rpm），如果一上来就打补丁，subprocess.run(['node', ...])
+    直接 FileNotFoundError，把 step_frontend 整个打断 —— 前面几步已经改了文件，
+    后面几步一个没做，日志里只有一个 traceback，很容易被当成"补丁打完了"。
+    宝塔自己装的 node 在 /www/server/nodejs/v*/bin/node，一并当候选。"""
+    cands = [shutil.which('node'), '/usr/bin/node', '/usr/local/bin/node']
+    cands += sorted(glob.glob('/www/server/nodejs/v*/bin/node'), reverse=True)
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+NODE_BIN = find_node()
+
+
 def js_ok(content):
+    """用 node --check 校验。返回 (True/False, err)；**没有 node 时返回 (None, 原因)**，
+    调用方要把 None 当成「无法校验、跳过并明确报出来」，别当成通过也别崩。"""
+    if not NODE_BIN:
+        return None, '找不到 node，无法执行 --check'
     tmp = '/tmp/moli_patch_chk.mjs'
     open(tmp, 'w', encoding='utf-8').write(content)
-    r = subprocess.run(['node', '--check', tmp], capture_output=True, text=True)
+    r = subprocess.run([NODE_BIN, '--check', tmp], capture_output=True, text=True)
     return r.returncode == 0, (r.stderr or '').strip()[-160:]
 
 
@@ -390,6 +412,7 @@ def step_noupdate():
 
 def step_frontend():
     say('--- 3) 前端：授权默认值 / 账户兜底 ---')
+    skipped_no_node = False
     for p in glob.glob(os.path.join(PANEL, 'BTPanel/static/js/*.js')) + \
              glob.glob(os.path.join(PANEL, 'BTPanel/static/panel-platform/assets/*.js')):
         try:
@@ -408,12 +431,24 @@ def step_frontend():
         if s == orig:
             continue
         ok, err = js_ok(s)
+        if ok is None:
+            # 没有 node：不能改前端（改了没法校验，坏一个 JS 就能把面板 UI 打死），
+            # 也不崩 —— 明确说清楚「这几条没做」，verify 会显示成「未生效」
+            say('[警告] %s：%s —— 跳过所有前端 JS 补丁' % (os.path.basename(p), err))
+            skipped_no_node = True
+            break
         if not ok:
             say('[跳过] %s 改动后语法错误：%s' % (os.path.basename(p), err))
             continue
         backup(os.path.relpath(p, PANEL))
         wr(p, s, 0o755)
         say('[完成] %s   %s' % (os.path.relpath(p, PANEL), '; '.join(hits)))
+    if skipped_no_node:
+        say('')
+        say('！前端 JS 补丁没做（缺 node）。补法二选一：')
+        say('    1) 装 node 后重跑本脚本：dnf install -y nodejs && 再执行一次 moli_patch.py')
+        say('    2) 用仓库的 install/qiyuntai-install.sh patch —— 那一步之前会先对齐依赖')
+        say('  注意后端那几条已经打上了，重跑是幂等的。')
 
 
 def step_stamp():
@@ -478,9 +513,15 @@ def step_browser_gate():
             is_mod = 'module' in attrs
             tmp = '/tmp/moli_gate_%d.%s' % (i, 'mjs' if is_mod else 'js')
             open(tmp, 'w', encoding='utf-8').write(code)
-            r = subprocess.run(['node', '--check', tmp], capture_output=True, text=True)
+            if not NODE_BIN:
+                # 没有 node 就没法校验内联脚本 —— 不能硬改（改坏了面板直接打不开）
+                continue
+            r = subprocess.run([NODE_BIN, '--check', tmp], capture_output=True, text=True)
             if r.returncode != 0 and 'import.meta' not in code:
                 bad.append(i)
+        if not NODE_BIN:
+            say('[警告] 找不到 node，无法校验内联脚本 —— 跳过「关闭浏览器版本检测」（这条会显示为「未生效」）')
+            continue
         if bad:
             say('[失败] %s 内联脚本校验不过，放弃（脚本号 %s）' % (rel, bad))
             continue
