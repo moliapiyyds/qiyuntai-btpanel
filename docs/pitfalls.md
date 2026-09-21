@@ -387,3 +387,48 @@ dmesg | grep 'name="null"'
 
 **通用教训**：写装机脚本别假设 Android 侧有 GNU 工具链。
 `toybox` 的能力集随机型/版本变化，能用的东西先 `command -v` 探一遍再决定分支。
+
+### 4. `/dev` 又被删了一次（2026-09-21，第二次）—— 复位手法 + 新加的两道防线
+
+**怎么又中招的**：`install/prepare-rootfs.sh` 退出时会**故意留着** 5 个挂载，其中
+`$ROOT/dev` 是 `mount --bind /dev` —— 也就是**宿主真实 `/dev` 的绑定挂载**
+（挂载参数与原 `/dev` 完全一致：`tmpfs ... size=2893492k,nr_inodes=723373,mode=755`，
+所以只看 `mount` 输出很容易当成"一个普通 tmpfs"）。
+
+我在这个挂载还活着的时候对那个目录跑了 `rm -rf`，`rm` 走进真实 `/dev` 把设备节点删了。
+`/dev/null` 变成 54 字节普通文件、`/dev/socket` 整个消失 → zygote 打不开 → **黑屏**。
+和第一次的机制一模一样，只不过第一次是 `/data/oe_test`，这次是 `/data/oe_verify`。
+
+**复位手法（不用重刷机、不用进 recovery）**：
+1. 先确认 adbd 还活着：`adb devices` 显示 `device` 就能救。
+2. 手工补回关键节点（能让部分服务活过来，但 `/dev/socket`、binder、ashmem
+   是 init 建的，补不了）：
+   ```sh
+   mknod /dev/null c 1 3; mknod /dev/zero c 1 5; mknod /dev/random c 1 8
+   mknod /dev/urandom c 1 9; mknod /dev/full c 1 7; mknod /dev/tty c 5 0
+   mknod /dev/console c 5 1; mknod /dev/ptmx c 5 2
+   chmod 666 /dev/null /dev/zero /dev/random /dev/urandom /dev/full /dev/tty /dev/ptmx
+   ```
+3. **重启**（init/ueventd 会重建整个 `/dev`）。adb 里两条命令的实测结果：
+   - `adb reboot` → `reboot (reboot,adb) failed`（被拒）
+   - `setprop sys.powerctl reboot` → `failed to set property`（被拒）
+   - `echo b > /proc/sysrq-trigger` → **成功**（设备随即从 adb 消失，约 1 分钟回来）
+4. 回来后的自检：`/dev` 条目数应回到 ~256，`/dev/null` 应是 `crw-rw-rw- 1,3`，
+   `/dev/socket`、`/dev/binder`、`/dev/ashmem` 都在；`init.svc.zygote=running`、
+   `init.svc.bootanim=stopped`、`sys.boot_completed=1`。
+
+**为什么必须重启**：`/dev/socket` 下是 Android 各服务的 unix socket，由 init 创建，
+手工 `mknod` 补不出来。
+
+**这次新加的两道防线**（避免下次再靠"记得先解挂载"）：
+* `module/uninstall.sh` 原来在提示里直接教 `rm -rf /data/openeuler` —— 这正是会毁掉
+  `/dev` 的命令，而且写在用户最可能照做的地方（卸模块时）。现在改成：
+  新增 `--purge`（**先证明 `$ROOT/` 下挂载数为 0，再删**，否则拒绝执行），
+  默认提示也改成"先 `mount | grep -c $ROOT/` 确认输出 0，再删"。
+* `install/prepare-rootfs.sh` 新增 `--clean`：解挂载 → 确认干净 → 删除，一条命令搞定。
+
+**顺带纠正一个查进程的坑**：这台设备的 toybox `ps` **不支持 `-o NAME`**
+（只支持 `user,group,comm,args,pid,ppid,pgid,etime,...`）。我写
+`ps -A -o NAME | grep zygote` 并顺手 `2>/dev/null`，输出为空还 grep 不到，
+于是误报"系统进程 0 个、系统没起来"。实际系统是好的。
+**查进程要么用 `comm`/`args`，要么直接扫 `/proc/<pid>/cmdline`；并且别把 stderr 丢掉。**

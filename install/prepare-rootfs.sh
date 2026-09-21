@@ -13,6 +13,9 @@
 #   sh prepare-rootfs.sh --tar /sdcard/xxx.tar        # 用已经解压好的 docker tar
 #   sh prepare-rootfs.sh --root /data/oe_test --tar ... # 铺到别的目录（安全试跑用）
 #   sh prepare-rootfs.sh --list                       # 只列出清华镜像上的可用文件
+#   sh prepare-rootfs.sh --unmount                    # 只解挂载（删除前必做）
+#   sh prepare-rootfs.sh --clean                      # 解挂载+确认干净+删除（安全的删法；
+#                                                     #   挂载还在时 rm -rf 会毁掉手机 /dev）
 #
 # 默认目标目录：/data/openeuler
 #
@@ -34,6 +37,7 @@ SRC_TAR=""
 DO_LIST=0
 DO_UNMOUNT=0
 DO_MIRROR=0
+DO_CLEAN=0
 LAYER_DIR=/data/oe_layer
 
 die() { echo "x $*" >&2; exit 1; }
@@ -49,6 +53,7 @@ while [ $# -gt 0 ]; do
         --list) DO_LIST=1;    shift ;;
         --mirror) DO_MIRROR=1; shift ;;
         --unmount) DO_UNMOUNT=1; shift ;;
+        --clean) DO_CLEAN=1;  shift ;;
         -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) die "未知参数：$1（-h 看用法）" ;;
     esac
@@ -120,6 +125,32 @@ if [ "$DO_UNMOUNT" = "1" ]; then
     echo ""
     echo "---- 解挂载 $ROOT ----"
     unmount_all
+    echo "完成。"
+    exit 0
+fi
+
+# ---------- --clean：解挂载 -> 确认干净 -> 删除（安全的删除方式） ----------
+# 为什么还要专门给个开关：$ROOT/dev 是 `mount --bind /dev`，也就是宿主真实
+# /dev 的绑定挂载。挂载还活着时 rm -rf，rm 会走进真实 /dev 把设备节点删掉，
+# /dev/null 变成普通文件 -> zygote 打不开 -> 手机黑屏。
+# 实测踩过两次（2026-09-21，第二次是对另一个 chroot 目录做 rm -rf）。
+if [ "$DO_CLEAN" = "1" ]; then
+    echo ""
+    echo "---- 清理 $ROOT ----"
+    unmount_all
+    LEFT=$(mount | grep -c "$ROOT/")
+    if [ "$LEFT" != "0" ]; then
+        echo "x 拒绝删除：$ROOT 下面还有 $LEFT 个挂载"
+        mount | grep "$ROOT/"
+        echo "  先手动解挂载，或再跑一次 --clean。"
+        exit 1
+    fi
+    say "挂载已确认干净，开始删除"
+    rm -rf "$ROOT"
+    if [ -d "$ROOT" ]; then
+        echo "x 删除不完整，仍残留：$(ls "$ROOT" 2>/dev/null | tr '\n' ' ')"
+        exit 1
+    fi
     echo "完成。"
     exit 0
 fi
