@@ -1,7 +1,11 @@
 #!/bin/bash
+# shellcheck disable=SC1090  # source 的是宝塔面板自带的 public.sh，不在本仓库里
+# shellcheck disable=SC2034  # Is_64bit / CONFIGURE_BUILD_TYPE 是给面板脚本读的，本文件不直接用
 # ============================================================
 # 栖云台 · 宝塔依赖安装脚本（本机适配版 shim）
-# 部署时覆盖 /www/server/panel/install/lib.sh（原版请先备份为 lib.sh.bt-orig）
+# 部署时覆盖 /www/server/panel/install/lib.sh
+#   —— 覆盖前由 install/qiyuntai-install.sh 自动把原版留一份为同目录 lib.sh.bt-orig
+#      （幂等：已经存在 .bt-orig 就不再动，避免二次执行把 shim 当成「原版」备份掉）
 # ------------------------------------------------------------
 # 为什么换掉原版：
 #   原版 lib.sh 会 yum 安装上百个包（很多在 openEuler 上不存在，会让整条

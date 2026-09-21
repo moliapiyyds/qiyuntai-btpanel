@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC2010  # 只对 /proc 用 ls|grep，其子项按构造只有数字，无特殊字符隐患
 # 茉莉定制：crond 的 SysV 启动脚本（openEuler 只带了 /usr/sbin/crond，没有 init 脚本）
 # chkconfig: 2345 90 10
 # description: cron 计划任务守护进程（宝塔面板的「计划任务」依赖它）

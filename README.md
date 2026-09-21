@@ -14,7 +14,7 @@
 
 ## 一键部署（复制即用）
 
-**在电脑上执行**（需要 `adb` + 能连 GitHub；手机 arm64、已 root、`/data` 空闲 ≥ 8-10 GB）：
+**在电脑上执行**（需要 `adb` + 能连 GitHub；手机 arm64、已 root、`/data` 空闲 **≥ 20 GB**）：
 
 ```powershell
 git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
@@ -41,11 +41,11 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 
 | 层 | 内容 |
 | --- | --- |
-| 底层 | openEuler 24.03 LTS-SP3 aarch64 chroot，落在 `/data/openeuler`（约 400 MB 起，装完组件约 4-6 GB） |
-| 面板 | 宝塔面板（aarch64 版），端口/入口**安装时随机**（每台机器不同，见下文「怎么访问」），已解锁**永久企业版**、**关闭更新**、**免 bt.cn 绑定** |
+| 底层 | openEuler 24.03 LTS-SP3 aarch64 chroot，落在 `/data/openeuler`（**实测装完 17.7 GB**，其中 MariaDB 编译构建树 `www/server/mysql/src` 占 8.8 GB，删掉可回收） |
+| 面板 | 宝塔面板 **13.0.0**（aarch64 版），端口/入口**安装时随机**（每台机器不同，见下文「怎么访问」），已解锁**永久企业版**、**关闭更新**、**免 bt.cn 绑定** |
 | 环境组件 | **OpenResty 1.31.1.1**、**MariaDB 10.11.16**、**PHP 8.2.33**、**phpMyAdmin 5.2**、**Redis 7.2.16**、**Memcached 1.6.45**、**Tomcat 9.0**、**Supervisor 4.2.4** |
-| 管理插件 | Fail2ban 2.6、Node.js版本管理器 2.8（内置 node **v20.18.2**）、java环境管理器 / jdk_manager（内置 JDK **17.0.20.8**）、Python项目管理器（`pythonmamager`）、python环境管理器（`pyenv_manager`）、Supervisor 进程管理器、Tomcat（`tomcat2`）、Redis |
-| 额外环境 | Python 3.13.14 + pip/venv、OpenJDK 17.0.20.8 / 11.0.32.9 / 1.8.0_502、Node.js v20.18.2 + npm 10.8.2、git/vim/htop/tmux/jq/sqlite3、完整编译链、iptables-legacy |
+| 管理插件 | Fail2ban 2.6、Node.js版本管理器 2.8（内置 node **v20.18.3**）、java环境管理器 / jdk_manager（内置 JDK **17.0.20.8**）、Python项目管理器（`pythonmamager`）、python环境管理器（`pyenv_manager`）、Supervisor 进程管理器、Tomcat（`tomcat2`）、Redis |
+| 额外环境 | Python 3.13.14 + pip/venv、OpenJDK 17.0.20.8 / 11.0.32.9 / 1.8.0_502、Node.js **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `/usr/bin/node`）+ npm 10.8.2、git/vim/htop/tmux/jq/sqlite3、完整编译链、iptables-legacy |
 | 开机自启 | KernelSU 模块 `qiyuntai_btpanel`：挂 chroot → 写 DNS → 修正 Android 网络限制 → 依次拉起 **面板/nginx/MariaDB/PHP-FPM/Fail2ban/crond/Redis/Memcached/Tomcat/supervisord** → 自检 |
 
 ---
@@ -87,10 +87,10 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 
 ## 三、部署
 
-> 前提：**arm64 设备**、已 root（KernelSU-Next / KernelSU / Magisk 都行）、`/data` 空闲 **≥ 8-10 GB**。
+> 前提：**arm64 设备**、已 root（KernelSU-Next / KernelSU / Magisk 都行）、`/data` 空闲 **≥ 20 GB**（实测装完占 17.7 GB）。
 > 全程只写 `/data/openeuler` 与 `/data/adb/modules`，不动系统分区。
 
-### 一键部署（推荐）
+### 一键部署：完整参数与流程
 
 电脑上执行（电脑要能连 GitHub，且装了 adb）：
 
@@ -293,7 +293,7 @@ CHANGELOG.md              更新日志
 * PHP **8.2.33** 编译安装，php-fpm 运行，`/tmp/php-cgi-82.sock` 就绪
 * phpMyAdmin **5.2**，`/www/server/phpmyadmin/version.pl` = `5.2`
 * Fail2ban **2.6** 插件（内含 fail2ban 1.1.1.dev1）：启动 → 封禁 `203.0.113.9` → `iptables-legacy` 出现 `f2b-sshd` 规则 → 解封后规则消失
-* 补丁生效：`get_soft_list` 返回 `ltd=-2 / pro=-2`（面板显示企业版·永久）、`is_bind()` 恒真、升级脚本已空壳
+* 补丁生效：`get_soft_list` 返回 `ltd=0 / pro=-1`（面板显示企业版·永久）。**不是 -2** —— 原因见 `docs/pitfalls.md` §一.7、`is_bind()` 恒真、升级脚本已空壳
 * 商店状态核对：nginx / mysql(MySQL 卡片) / php-8.2 / phpmyadmin / fail2ban / nodejs 全部 **已安装**
 * **两次重启实测**：模块自动挂载 chroot、写 DNS、拉起 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / Redis，
   面板自检 `HTTP=200`，端口 80/888/3306 与面板端口全部监听（日志见 `boot.log`）

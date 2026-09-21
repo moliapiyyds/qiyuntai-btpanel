@@ -12,6 +12,10 @@ docs/private-deployment.md
 # 打模块 zip 时的临时目录
 _dist/
 
+# Python 编译产物（tools/ci.sh 会跑 py_compile，别把它们提交进来）
+__pycache__/
+*.pyc
+
 # Windows
 Thumbs.db
 desktop.ini

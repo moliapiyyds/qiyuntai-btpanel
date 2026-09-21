@@ -7,7 +7,12 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export JAVA_HOME=/www/server/java/jdk-17.0.8
 export CATALINA_HOME=/www/server/tomcat
 export CATALINA_BASE=/www/server/tomcat
-[ -x "$JAVA_HOME/bin/java" ] || export JAVA_HOME=$(dirname $(dirname $(readlink -f /usr/bin/java 2>/dev/null)) 2>/dev/null)
+# JAVA_HOME 指向的 JDK 不可用时，回退到 /usr/bin/java 真实指向的那一层
+if [ ! -x "$JAVA_HOME/bin/java" ]; then
+    _j=$(readlink -f /usr/bin/java 2>/dev/null)
+    [ -n "$_j" ] && JAVA_HOME=$(dirname "$(dirname "$_j")")
+    export JAVA_HOME
+fi
 CT=$CATALINA_HOME/bin/catalina.sh
 
 running() { pgrep -f 'catalina.base=/www/server/tomcat' >/dev/null 2>&1; }

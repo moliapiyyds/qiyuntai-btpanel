@@ -1,0 +1,21 @@
+# 宝塔官方安装器 install_panel.sh 的已核验哈希清单
+#
+# 用途：install/qiyuntai-install.sh 的 step_panel 会先下载安装器、算 sha256，
+#       再到这里查。命中说明是人工核验过的版本；不命中会**大声警告**并改按
+#       「逐提示判断」作答（install/bt-panel-install.exp），
+#       遇到不认识的提问直接失败 —— 不会把答案喂到错的提示上。
+#
+# 官方脚本随时会变，所以这里不是「白名单拒绝」而是「已知版本加速 + 变化告警」。
+#
+# 格式：
+#   <sha256>  <核验日期>  <当时面板版本>  <提问点>  说明
+#
+# 核验方法（跑通后把新哈希追加进来）：
+#   1) chroot /data/openeuler /bin/bash -c 'curl -fsSL -o /root/install_panel.sh https://download.bt.cn/install/install_panel.sh'
+#   2) sha256sum /data/openeuler/root/install_panel.sh
+#   3) 人工看一遍：grep -n 'read -p' /data/openeuler/root/install_panel.sh
+#      确认每个提问点都被 bt-panel-install.exp 的两个分支覆盖
+#   4) 实测装通一次后，把新哈希追加到本文件
+#
+# sha256                                                             核验日期      面板版本  提问点
+95ed59e4218629b99427848fd1a160b5a1f2dfde4b43494bb4136b29d6a7311f  2026-09-21    13.0.0    3 个：安装路径确认(y/n) / 输入yes开始安装 / 输入yes强制安装

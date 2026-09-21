@@ -22,6 +22,53 @@
   参数 `--check` / `--repo-only` / `--repo-tar` / `--url` / `--tar` / `--no-reboot`。
 * **README 首页把一键命令提到最前面** —— 原来埋在「三、部署」里，要滚过两节才看得到。
 
+### 面板安装器：不再耦合官方提问顺序
+
+* 原来 `step_panel` 是 `printf "y\nyes\nyes\n" | bash install_panel.sh`，把答案顺序和官方
+  提问顺序绑死了。实测官方脚本三个提问点里，「输入yes强制安装」在函数内部、是条件路径，
+  **文本顺序 ≠ 运行顺序**，官方动一处就会答错位置。
+* 更隐蔽的是：bash 的 `read -p` 在 stdin 不是终端时**根本不打印提示**（管道和 FIFO 都实测过，
+  stderr 为空；旧安装日志里也搜不到任何提示文本），所以喂管道时答错了连日志都看不出来。
+* 现在：安装器先落盘 → sha256 对 `install/installer.lock`（人工核验过的哈希清单）
+  → 静态列出提问点供对照 → 用 `expect` 分配 pty，**按提示内容**作答
+  （`install/bt-panel-install.exp`）；遇到不认识的提问直接失败，而不是乱答一个。
+  `step_deps` 相应加了 `expect`。
+
+### 修掉的实测缺陷
+
+* **`lib.sh` 覆盖前没有备份**：`docs/handover.md` §六 与 `module/README.md` §七 都把
+  `install/lib.sh.bt-orig` 列为回滚点，实测该文件**根本不存在**（`step_components` 是直接
+  `cp -f` 覆盖，从来没生成过备份）。现在覆盖前自动留底，并且幂等 —— 已有 `.bt-orig` 就不再动，
+  避免第二次执行把 shim 当成「原版」备份掉。
+* `prepare-rootfs.sh` 的 `STAGE` 是死变量（只赋值、全文件无引用）。
+* `tomcat.initd` 的 `JAVA_HOME` 回退写法把 `$(...)` 全裸着（4 条 shellcheck 告警），已改写。
+* `step_plugins` 里只有一个元素的 `for` 循环，改成直接 `cp`。
+
+### CI
+
+* 新增 `tools/ci.sh` + `.github/workflows/ci.yml`，本地和 CI 跑同一个脚本：
+  `shellcheck -S warning` / `sh -n` / `python3 -m py_compile` / `node --check` /
+  行尾 CRLF / `deploy.ps1` 的 UTF-8 BOM / `installer.lock` 哈希格式。
+  用 `CI=true` 区分「本地没装工具可以跳过」和「CI 里必须装，不许静默跳过」。
+* 已实测：注入 shell 语法错误、python 语法错误、CRLF、丢 BOM、坏哈希 5 类故障，
+  全部被拦下（基线正常通过）。
+* 顺带发现并修掉：`tools/__pycache__/*.pyc` 会被 `git add -A` 扫进版本库，已加 `.gitignore`。
+
+### 文档口径统一（2026-09-21 复核）
+
+* `ltd`/`pro`：三处文档写 **-2**，实际代码是 **`ltd=0` / `pro=-1`**（`tools/moli_patch.py`）。
+  已按代码改正，并说明为什么不能用 -2（-2 在前端对应「已过期」，0 会被后端 `if not ltd` 吞掉，
+  必须配合数据层补丁）。
+* 面板版本：三处文档写 **9.5.0**，实测是 **13.0.0**（`class/common.py` 的 `g.version` 与
+  `/tmp/LinuxPanel-13.0.0.pl` 两处一致）。
+* Node：原来判成「`v20.18.3` 写错、应为 `v20.18.2`」，其实是**两个都对、指的不是同一个东西** ——
+  `v20.18.3` 是宝塔 Node 管理器内置的（`/www/server/nodejs/v20.18.3/bin/node`），
+  `v20.18.2` 是系统 `/usr/bin/node`。
+* 磁盘：README 写「装完约 4-6 GB、`/data` 空闲 ≥ 8-10 GB」，实测装完 **17.7 GB**
+  （其中 `www/server/mysql/src` 这个编译构建树占 8.8 GB），已改为 ≥ 20 GB。
+* `fail2ban-server -V` 打印的 `1.1.1.1` 是 `version.replace('.dev','.')` 归一化的结果，
+  真实版本 `1.1.1.dev1` —— 已在 pitfalls 注明，免得被当成版本写错。
+
 ### 文档
 
 * `docs/pitfalls.md` 补「面板反爬虫 UA 分界线」实测：`is_spider()` 命中时返回伪装成
@@ -66,7 +113,8 @@
 
 **无逐版本记录。** 已知在这个阶段落地的东西（按文件时间戳与提交信息推断，非逐版本归属）：
 
-* 首次交付：openEuler 24.03 LTS-SP3 aarch64 chroot + 宝塔面板 9.5.0 + 破解补丁
+* 首次交付：openEuler 24.03 LTS-SP3 aarch64 chroot + 宝塔面板 + 破解补丁
+  （面板版本当时记为 9.5.0，2026-09-21 复核实际是 **13.0.0**，已改正）
 * 组件安装：OpenResty / MariaDB 10.11 / PHP 8.2 / phpMyAdmin 5.2 / Fail2ban / Redis / Node.js 管理器
 * `chroot-compat-layer.sh`：`systemctl` / `service` / `start-stop-daemon` / `iptables-legacy` 兼容层
 * `android-network-fix.sh`：Android paranoid-network 的 `inet` 组修正

@@ -29,6 +29,8 @@ ROOT=/data/openeuler
 REPO_DIR=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
 TMP=/data/local/tmp/qiyuntai
 MIRROR=https://mirrors.tuna.tsinghua.edu.cn/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64
+# 官方安装器：先落盘再校验，不 curl | bash（原因见 step_panel 注释）
+INSTALLER_URL=https://download.bt.cn/install/install_panel.sh
 CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
 STEP="${1:-all}"
 
@@ -117,7 +119,8 @@ step_deps() {
       libjpeg-turbo libjpeg-turbo-devel libpng libpng-devel freetype freetype-devel gd gd-devel \
       oniguruma oniguruma-devel libwebp libwebp-devel libvpx libvpx-devel libsodium libsodium-devel \
       glib2 glib2-devel libstdc++ libstdc++-devel perl perl-devel perl-Data-Dumper \
-      vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel'
+      vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel \
+      expect'
     in_chroot 'id www >/dev/null 2>&1 || { NOLOGIN=/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/usr/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/bin/false; groupadd www; useradd -s $NOLOGIN -g www www; }'
     # 关键：写 bt_lib 锁，跳过宝塔原版 lib.sh 里上百个 yum 包 + openssl/mcrypt 源码编译
     echo "true" > "$ROOT/etc/bt_lib.lock"
@@ -125,11 +128,55 @@ step_deps() {
 }
 
 # ---------------- 4) 面板 ----------------
+# 说明：这里**不是** curl | bash 把安装器直接喂进去，也不用固定顺序喂答案。
+#
+# 实测依据（2026-09-21）：
+#   1) 官方 install_panel.sh 里有三个提问点，其中「输入yes强制安装」在函数内部、
+#      是条件路径，所以**文本顺序 ≠ 运行顺序**。原来写的
+#      printf "y\nyes\nyes\n" | bash install_panel.sh 把答案顺序和官方提问顺序
+#      绑死了，官方动一处就会答错位置。
+#   2) 更隐蔽的是：bash 的 read -p 在 stdin 不是终端时**不打印提示**
+#      （管道和 FIFO 都实测过，stderr 为空；旧日志里也搜不到任何提示文本）。
+#      也就是说喂管道的时候，答错了连日志都看不出来。
+#
+# 现在的做法：先落盘 → 校验 sha256（allow-list，见 install/installer.lock）
+#             → 列出提问点供对照 → 用 expect 分配 pty，按**提示内容**作答。
 step_panel() {
     [ -x "$ROOT/www/server/panel/BT-Panel" ] && { log "面板已安装，跳过"; return 0; }
-    log "安装宝塔面板（约 4-10 分钟）"
-    in_chroot 'cd /root && curl -fsSL -o install_panel.sh https://download.bt.cn/install/install_panel.sh && printf "y\nyes\nyes\n" | bash install_panel.sh' \
-        2>&1 | tee "$ROOT/tmp/bt_install.log"
+
+    log "下载宝塔官方安装器（先落盘，不再 curl|bash）"
+    in_chroot "curl -fsSL --max-time 120 -o /root/install_panel.sh $INSTALLER_URL" \
+        || fail "下载 install_panel.sh 失败（$INSTALLER_URL）"
+
+    local H
+    H=$(in_chroot 'sha256sum /root/install_panel.sh' | cut -d' ' -f1 | tr -d '\r')
+    log "install_panel.sh sha256 = $H"
+    if [ -f "$REPO_DIR/install/installer.lock" ] && grep -q "^$H" "$REPO_DIR/install/installer.lock"; then
+        log "哈希命中 install/installer.lock（人工核验过的版本）"
+    else
+        warn "哈希不在已核验清单里 —— 官方安装器很可能已经更新"
+        warn "不会中止，但会改按提示内容作答；遇到不认识的提问会立即失败，不会乱答"
+        warn "人工核验通过后，把 $H 追加到 install/installer.lock"
+    fi
+
+    log "静态列出安装器里的提问点（供人工对照）"
+    grep -n 'read -p' "$ROOT/root/install_panel.sh" 2>/dev/null | sed 's/^/    /' || true
+
+    log "安装宝塔面板（expect 驱动 pty，约 4-10 分钟）"
+    cp -f "$REPO_DIR/install/bt-panel-install.exp" "$ROOT/root/bt-panel-install.exp"
+    chmod 755 "$ROOT/root/bt-panel-install.exp"
+    in_chroot '/usr/bin/expect -f /root/bt-panel-install.exp /root/install_panel.sh'
+    local rc=$?
+    [ "$rc" = "0" ] || fail "面板安装失败（驱动退出码 $rc，完整记录 $ROOT/tmp/qyt_panel_install.log）"
+
+    [ -x "$ROOT/www/server/panel/BT-Panel" ] \
+        || fail "安装器跑完了，但没找到 $ROOT/www/server/panel/BT-Panel"
+
+    log "面板已安装"
+    if ls "$ROOT"/tmp/LinuxPanel-*.pl >/dev/null 2>&1; then
+        log "官方包记录（官方自己写的版本+zip哈希）: $(cat "$ROOT"/tmp/LinuxPanel-*.pl 2>/dev/null | head -c 200)"
+    fi
+    in_chroot "grep -m1 'g.version' /www/server/panel/class/common.py" | sed 's/^/    /'
     log "面板安装完成，接着会生成随机密码并留档凭据"
 }
 
@@ -179,7 +226,16 @@ print(r[0][0] if r else \"\")"' 2>/dev/null | tr -d '\r' | tail -1)
 step_components() {
     log "用宝塔官方脚本安装组件（源码编译，耗时较长）"
     # lib.sh 换成本仓库的 shim：依赖已由 dnf 装好，避免重复编译 openssl/curl/mcrypt
+    # 覆盖前必须把原版留一份 —— docs/handover.md §六 与 module/README.md §七 都把
+    # install/lib.sh.bt-orig 列为回滚点，而原来这里是直接 cp -f 覆盖，备份从来没生成过。
+    # 幂等：已经有 .bt-orig 就不再动，否则第二次执行会把 shim 当成「原版」备份掉。
     if [ -f "$REPO_DIR/install/lib-shim.sh" ]; then
+        if [ -f "$ROOT/www/server/panel/install/lib.sh" ] \
+           && [ ! -f "$ROOT/www/server/panel/install/lib.sh.bt-orig" ]; then
+            cp -p "$ROOT/www/server/panel/install/lib.sh" \
+                  "$ROOT/www/server/panel/install/lib.sh.bt-orig" \
+                && log "已留底宝塔原版 lib.sh -> install/lib.sh.bt-orig"
+        fi
         cp -f "$REPO_DIR/install/lib-shim.sh" "$ROOT/www/server/panel/install/lib.sh"
         chmod 755 "$ROOT/www/server/panel/install/lib.sh"
     fi
@@ -193,9 +249,7 @@ step_components() {
 
 step_plugins() {
     log "安装宝塔插件：Fail2ban（免登录，走官方下载接口）"
-    for f in "$REPO_DIR"/tools/plugin_install.py; do
-        cp -f "$f" "$ROOT/tmp/plugin_install.py"
-    done
+    cp -f "$REPO_DIR/tools/plugin_install.py" "$ROOT/tmp/plugin_install.py"
     in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/plugin_install.py fail2ban'
 }
 

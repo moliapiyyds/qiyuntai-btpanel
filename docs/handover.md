@@ -33,7 +33,7 @@
 
 | 组件 | 版本 | 实测证据 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0 (aarch64) | 登录页 200，进程 BT-Panel |
+| 宝塔面板 | **13.0.0** (aarch64) | `class/common.py` 的 `g.version` 与 `/tmp/LinuxPanel-13.0.0.pl` 两处一致 |
 | Web | **OpenResty 1.31.1.1** | `nginx -v` → openresty/1.31.1.1，`nginx -t` ok，监听 80/888 |
 | 数据库 | **MariaDB 10.11.16** | `select version()` → 10.11.16-MariaDB-log，监听 3306 |
 | PHP | **8.2.33** | `php -v` → 8.2.33，php-fpm 运行，`/tmp/php-cgi-82.sock` |
@@ -44,7 +44,7 @@
 | Tomcat | **9.0** | `catalina.jar` MANIFEST 的 `Specification-Version: 9.0`，插件名 `tomcat2` |
 | Supervisor | **4.2.4** | `supervisord --version` |
 | Memcached | **1.6.45** | `memcached --version` |
-| 额外环境 | Python **3.13.14** + pip 26.2、OpenJDK **1.8.0_502 / 11.0.32.9 / 17.0.20.8**、Node **v20.18.2** + npm **10.8.2**、git 2.43.0、vim 9.0、htop 3.3.0、tmux 3.3a、jq 1.8.2、sqlite3 3.42.0、gcc 12.3.1 / make 4.4.1 / cmake 3.27.9、rsync 3.2.7、tcpdump(libpcap 1.10.4)、lsof 4.99.3 | 逐个 `--version` 核对通过（2026-09-21 复核） |
+| 额外环境 | Python **3.13.14** + pip 26.2、OpenJDK **1.8.0_502 / 11.0.32.9 / 17.0.20.8**、Node **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `/usr/bin/node`）+ npm **10.8.2**、git 2.43.0、vim 9.0、htop 3.3.0、tmux 3.3a、jq 1.8.2、sqlite3 3.42.0、gcc 12.3.1 / make 4.4.1 / cmake 3.27.9、rsync 3.2.7、tcpdump(libpcap 1.10.4)、lsof 4.99.3 | 逐个 `--version` 核对通过（2026-09-21 复核） |
 
 商店「已安装」核对（脚本 `store_check.py`）：nginx / mysql / phpmyadmin / fail2ban / nodejs / redis 全部 **是**。
 
@@ -54,7 +54,7 @@
 
 | 需求 | 做法 | 验证 |
 | --- | --- | --- |
-| 显示**永久企业版** | `panelPlugin.get_cloud_list()` 返回前把 `ltd`/`pro` 覆盖为 **-2**（宝塔内部 -2 = 永久）；`expire_msg()` 打成空函数，屏蔽到期提醒 | 真调云端列表返回 `ltd=-2 pro=-2`；前端 `utils.js` 读 cookie `ltd_end=-2` → `advanced='ltd'` → 企业版 |
+| 显示**永久企业版** | `panelPlugin.get_cloud_list()` 返回前把 `ltd`/`pro` 覆盖为 **`ltd=0` / `pro=-1`**，并配合数据层补丁改 `get_pd()`；`expire_msg()` 打成空函数，屏蔽到期提醒。**注：不是 -2** —— -2 在前端对应「已过期」，而 0 会被后端 `if not ltd: ltd=-1` 吞掉，所以必须连数据层一起打 | 真调云端列表返回 `ltd=0 pro=-1`；前端 `utils.js` 读 cookie `ltd_end=0` → `0 > -1` 成立 → `advanced='ltd'` → 企业版 |
 | **去除更新** | `script/upgrade_panel.py`、`upgrade_panel_optimized.py`、`polkit_upgrade.py`、`update.sh` 替换为空壳；清掉 crontab 更新任务 | 四个文件均为空壳（355 B），原文件在 `panel/moli_patch/backup_*/` |
 | **免账号绑定** | `public.is_bind()` 恒返回 True；预置 `data/initBind.pl`、`data/bind.pl` | 实测 `public.is_bind() = True` |
 | 补丁本体 | `/www/server/panel/moli_patch/moli_patch.py`（幂等，可重复执行） | 语法检查通过 |
@@ -148,7 +148,7 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 | 内容 | 位置 |
 | --- | --- |
 | 面板破解前的原文件 | `/data/openeuler/www/server/panel/moli_patch/backup_*/` |
-| 宝塔原版 lib.sh | `…/panel/install/lib.sh.bt-orig` |
+| 宝塔原版 lib.sh | `…/panel/install/lib.sh.bt-orig` —— 由 `install/qiyuntai-install.sh` 在覆盖前自动留一份（幂等，已存在则不覆盖） |
 | fail2ban 原 Debian 启动脚本 | `/data/openeuler/etc/init.d/fail2ban.debian-orig` |
 | fail2ban 原 jail.local | `/data/openeuler/etc/fail2ban/jail.local.moli-orig` |
 | 内核备份（此前） | `D:\PAR-AL00_…\my_backup\kernel.img` (md5 `ef5f17daaf4f0173ef5c71df6a706807`) |
@@ -223,7 +223,7 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 | Node.js 管理器 | 2.8 | 插件 `info.json` 的 `versions` = `2.8` | 一致 |
 | Fail2ban 插件 | 2.6 | 插件 `info.json` 的 `versions` = `2.6` | 一致 |
 | **Fail2ban 上游** | **1.1.0** | **`Fail2Ban v1.1.1.dev1`** | **已改正** |
-| **Node.js 内置** | **v20.18.3** | **`v20.18.2`** | **已改正** |
+| **Node.js 内置** | **v20.18.3** | **两个都对，指的不是同一个东西**：宝塔管理器 `/www/server/nodejs/v20.18.3/bin/node -v` → `v20.18.3`；系统 `/usr/bin/node -v` → `v20.18.2` | **已澄清** |
 | **JDK（java环境管理器）** | **17.0.8** | **`javac 17.0.20`**，目录 `java-17-openjdk-17.0.20.8` | **已改正** |
 | Python | 3.13 | `Python 3.13.14`，pip 26.2 | 已补精确值 |
 | Java（系统 dnf） | 17 / 11 / 8 | 目录里确实三个都在：`1.8.0_502` / `11.0.32.9` / `17.0.20.8`。**默认 `java` 指向 8**（BiSheng build），**默认 `javac` 指向 17** | 已补说明 |
@@ -237,7 +237,8 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 ### 结论
 
 * 组件的**大版本号**（OpenResty / MariaDB / PHP / phpMyAdmin / Redis / Node 管理器 / Fail2ban 插件）**全部对得上**。
-* 三处**小版本号写错了**（Fail2ban 上游 1.1.0→1.1.1.dev1、Node v20.18.3→v20.18.2、JDK 17.0.8→17.0.20.8），已改正。
+* 两处**小版本号写错了**（Fail2ban 上游 1.1.0→**1.1.1.dev1**、JDK 17.0.8→**17.0.20.8**），已改正。
+* Node 那条原先判成「写错」，其实是**测错了对象**：`v20.18.3` 是宝塔 Node 管理器内置的，`v20.18.2` 是系统 `/usr/bin/node`。两个都对，现已分别注明。
 * 三个组件**文档漏写了**（Tomcat 9.0 / Supervisor 4.2.4 / Memcached 1.6.45），已补。
 
 面板自身的版本号可以从面板界面确认：登录后首页右下角，或「设置 → 面板信息」。

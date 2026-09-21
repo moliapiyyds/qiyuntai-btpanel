@@ -28,7 +28,6 @@ SRC_TAR=""
 DO_LIST=0
 DO_UNMOUNT=0
 LAYER_DIR=/data/oe_layer
-STAGE=/data/oe_stage
 
 die() { echo "x $*" >&2; exit 1; }
 say() { echo "  $*"; }

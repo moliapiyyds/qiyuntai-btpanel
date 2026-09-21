@@ -37,7 +37,8 @@ softInfo['setup'] = os.path.exists(softInfo['install_checks'])
 
 ### 4. 「Fail2ban 2.6」是插件版本，不是上游版本
 云端列表里该条目的 `versions[0]` 是 `m_version=2` + `version=6` → 显示 2.6，
-插件包里自带上游 fail2ban（本机实测 `fail2ban-client --version` → **v1.1.1.dev1**）。
+插件包里自带上游 fail2ban（本机实测 `pip show fail2ban` → **1.1.1.dev1**）。
+注意 `fail2ban-server -V` 打印的是 **`1.1.1.1`** —— 那是 `version.replace('.dev', '.')` 归一化后的结果，不是版本写错。
 上游 fail2ban 本身没有 2.6 这个版本号。
 
 ### 5. 插件包可以免登录下载
@@ -92,8 +93,11 @@ if public.is_spider(): return abort(404)
   bt.set_cookie('ltd_end', rdata.ltd)   // 来自 plugin/get_soft_list 响应
   if (ltd_end === -2 || ltd_end > -1) advanced = 'ltd'   // 企业版
   ```
-  语言表里 `web_end_time: '永久'`，即 `-2` 就代表永久。
-  所以补丁在 `panelPlugin.get_cloud_list()` 返回前把 `ltd`/`pro` 覆盖成 `-2`，
+  判据是 `ltd_end === -2` **或** `ltd_end > -1`，语言表里 `web_end_time: '永久'`。
+  **本仓库实际覆盖的是 `ltd=0` / `pro=-1`，不是 -2**：-2 在前端对应「已过期」，
+  而 0 会被后端 `get_pd()` 里的 `if not ltd: ltd = -1` 吞掉，
+  所以必须同时打数据层补丁改 `get_pd()`（`tools/moli_patch.py` 就是这么做的）。
+  补丁在 `panelPlugin.get_cloud_list()` 返回前把 `ltd`/`pro` 覆盖成 `0`/`-1`，
   同时把 `expire_msg()` 打成空函数（避免出现"授权剩余天数"提示）。
 * **免绑定**：`public.is_bind()` 直接返回 `True`，并预置 `data/initBind.pl`、`data/bind.pl`。
 * **去更新**：`script/upgrade_panel.py`、`script/upgrade_panel_optimized.py`、

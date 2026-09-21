@@ -140,7 +140,7 @@ bt 6      # 修改面板入口
 
 | 组件 | 版本 | 说明 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0（aarch64 版） | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
+| 宝塔面板 | **13.0.0**（aarch64 版） | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
 | Web 服务器 | **OpenResty 1.31.1.1**（宝塔 nginx 卡片的 openresty 版本） | 源码编译，`/www/server/nginx` |
 | 数据库 | **MariaDB 10.11 LTS** | 宝塔「MySQL」卡片里的 `mariadb_10.11` |
 | PHP | **8.2** | `/www/server/php/82`，php-fpm |
@@ -152,7 +152,7 @@ bt 6      # 修改面板入口
 | Memcached | **1.6.45** | 开机自动拉起 |
 | Python | **3.13.14**（面板 pyenv）+ 系统 python3 + pip/venv | |
 | Java | OpenJDK **17.0.20.8 / 11.0.32.9 / 1.8.0_502**（默认 `java` 是 8，默认 `javac` 是 17） | |
-| Node.js | **v20.18.2** + npm **10.8.2** | |
+| Node.js | **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `node`）+ npm **10.8.2** | |
 | 其他 | git、vim、htop、tmux、jq、sqlite3、rsync、lsof、net-tools、tcpdump、gcc/make/cmake 编译链 | |
 
 以上组件都是**用宝塔官方脚本/官方插件安装的**，所以在面板「软件商店 → 已安装」里能正常显示、能启停。
@@ -216,7 +216,7 @@ sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh
 | 内容 | 位置 |
 | --- | --- |
 | 面板原始文件备份（破解前） | `/data/openeuler/www/server/panel/moli_patch/backup_*/` |
-| 宝塔原版 lib.sh | `/data/openeuler/www/server/panel/install/lib.sh.bt-orig` |
+| 宝塔原版 lib.sh | `/data/openeuler/www/server/panel/install/lib.sh.bt-orig`（覆盖前自动留的，幂等） |
 | fail2ban 原 Debian 启动脚本 | `/data/openeuler/etc/init.d/fail2ban.debian-orig` |
 | fail2ban 原 jail.local | `/data/openeuler/etc/fail2ban/jail.local.moli-orig` |
 | 破解补丁本体 | `/data/openeuler/www/server/panel/moli_patch/moli_patch.py`（可重复执行） |
