@@ -478,7 +478,8 @@ EOS
     rm -f "$ROOT/www/server/panel/data/ssl.pl" "$ROOT/www/server/panel/data/check_ssl_cron.pl"
     log "  已移除 data/ssl.pl（面板回到只监听明文 HTTP）"
 
-    log "装 chroot 服务兼容层（systemctl/service/start-stop-daemon/iptables-legacy）"    sh "$REPO_DIR/install/chroot-compat-layer.sh"
+    log "装 chroot 服务兼容层（systemctl/service/start-stop-daemon/iptables-legacy）"
+    sh "$REPO_DIR/install/chroot-compat-layer.sh"
     log "Android paranoid-network 修正（MariaDB 监听 3306 必需）"
     sh "$REPO_DIR/install/android-network-fix.sh"
     in_chroot '/etc/init.d/bt restart' || true
