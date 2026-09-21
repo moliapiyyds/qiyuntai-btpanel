@@ -1,0 +1,96 @@
+#!/bin/sh
+# ============================================================
+# 茉莉定制：Memcached 的 SysV 启动脚本
+# 作者：茉莉  QQ:1265274322  官方Q群:570387739
+# ------------------------------------------------------------
+# 为什么需要仓库自己提供这个：
+#   chroot 里没有 systemd，而 openEuler 的 memcached 包只带
+#   /usr/lib/systemd/system/memcached.service（没有 /etc/init.d/memcached）；
+#   宝塔的插件列表里也没有 memcached 插件（那 9 个插件不含它）；
+#   面板包里更没有这个 init 脚本。
+#   而模块 service.sh 的 `start_svc memcached` 没有兜底逻辑 ——
+#   缺了这个文件就会「跳过 Memcached」，memcached 起不来。
+#   实测踩过：旧环境里有 /etc/init.d/memcached，是当初手工放的，安装脚本从没同步。
+# ============================================================
+# chkconfig: 2345 90 10
+# description: Memcached
+# processname: memcached
+# ============================================================
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+# 二进制：dnf 装在 /usr/bin；宝塔的 memcached 管理器装在 /usr/local/memcached/bin
+BIN=""
+for b in /usr/bin/memcached /usr/sbin/memcached /usr/local/memcached/bin/memcached; do
+    [ -x "$b" ] && BIN="$b" && break
+done
+
+PIDFILE=/var/run/memcached.pid
+LISTEN=127.0.0.1
+PORT=11211
+MEM=64
+CONN=1024
+
+running() {
+    [ -f "$PIDFILE" ] || return 1
+    p=$(cat "$PIDFILE" 2>/dev/null)
+    [ -n "$p" ] || return 1
+    kill -0 "$p" 2>/dev/null
+}
+
+# memcached 不允许以 root 运行，所以有 memcached 用户就降权
+USER_OPT=""
+if id memcached >/dev/null 2>&1; then
+    USER_OPT="-u memcached"
+fi
+
+start() {
+    if running; then echo "memcached 已在运行 (pid $(cat "$PIDFILE"))"; return 0; fi
+    [ -n "$BIN" ] || { echo "找不到 memcached 二进制（装：dnf install memcached）" >&2; return 1; }
+    mkdir -p /var/run
+    # -d 后台、-P 写 pid；拿不到 pid 文件时下面用 pgrep 兜底
+    "$BIN" -d -P "$PIDFILE" -l "$LISTEN" -p "$PORT" -m "$MEM" -c "$CONN" $USER_OPT >/dev/null 2>&1
+    sleep 1
+    if running || pgrep -x memcached >/dev/null 2>&1; then
+        echo "memcached 已启动（$LISTEN:$PORT，${MEM}MB）"
+        return 0
+    fi
+    echo "memcached 启动失败" >&2
+    return 1
+}
+
+stop() {
+    if running; then
+        p=$(cat "$PIDFILE" 2>/dev/null)
+        kill "$p" 2>/dev/null
+        i=0
+        while [ $i -lt 20 ] && kill -0 "$p" 2>/dev/null; do sleep 0.5; i=$((i + 1)); done
+        rm -f "$PIDFILE"
+        echo "memcached 已停止"
+    elif pgrep -x memcached >/dev/null 2>&1; then
+        pkill -x memcached 2>/dev/null
+        echo "memcached 已停止（按进程名）"
+    else
+        echo "memcached 未在运行"
+    fi
+    return 0
+}
+
+status() {
+    if running || pgrep -x memcached >/dev/null 2>&1; then
+        echo "memcached 正在运行（$LISTEN:$PORT）"
+        return 0
+    fi
+    echo "memcached 未运行"
+    return 3
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    reload|force-reload) stop; sleep 1; start ;;
+    status)  status ;;
+    *)       echo "用法: $0 {start|stop|restart|reload|status}"; exit 1 ;;
+esac

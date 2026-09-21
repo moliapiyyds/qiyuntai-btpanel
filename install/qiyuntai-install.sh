@@ -330,13 +330,18 @@ step_plugins() {
 # ---------------- 6) 补丁 + 兼容层 ----------------
 step_patch() {
     # 先把仓库自带的 init 脚本装进 chroot。
-    # 为什么必须做：chroot 里没有 systemd，而宝塔只带一部分 init 脚本 ——
-    # crond / tomcat 这两个是我们自己写的（见文件头注释）。
-    # 不装的话：service.sh 里 `start_svc tomcat` 会因为 /etc/init.d/tomcat 不存在
-    # 直接跳过，**Tomcat 起不来**（它没有兜底逻辑）；crond 有 /usr/sbin/crond 兜底，
-    # 但走 init 更统一。
-    # 实测踩过：这两个 .initd 原来只出现在文档里，没有任何脚本引用它们。
-    for s in crond tomcat; do
+    # chroot 里没有 systemd，而「谁提供 /etc/init.d/<服务>」这件事必须逐个对账
+    # （安装器不带、面板包不带、openEuler 只给 systemd 单元），否则 service.sh
+    # 只会打印一行"跳过"然后什么都不发生。逐个来源：
+    #   bt / nginx / mysqld / php-fpm-82 ← 宝塔安装器与组件安装脚本
+    #   fail2ban / redis / tomcat2      ← 宝塔对应插件（tomcat2 插件不带 init，
+    #                                     所以 tomcat 仍由我们提供）
+    #   crond / tomcat / memcached      ← 仓库自己写，就是下面这三个
+    # 不装的后果：service.sh 里 `start_svc tomcat` / `start_svc memcached`
+    # 因为没有兜底逻辑，直接跳过 —— **Tomcat、Memcached 起不来**，
+    # crond 有 /usr/sbin/crond 兜底但走 init 更统一。
+    # 实测踩过：这三个 .initd 原来只出现在文档里，没有任何脚本引用它们。
+    for s in crond tomcat memcached; do
         if [ -f "$REPO_DIR/install/$s.initd" ]; then
             cp -f "$REPO_DIR/install/$s.initd" "$ROOT/etc/init.d/$s"
             chmod 755 "$ROOT/etc/init.d/$s"

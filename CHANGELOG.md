@@ -6,6 +6,35 @@
 
 ---
 
+## 未发布（相对 v1.2.4）
+
+> 这一段改的全部是 `install/` 里的部署脚本和 README 的清单，**模块本体没动**，
+> 所以没有升 `module/module.prop` 的版本号 —— 等下一版模块和预制镜像一起发时再统一升。
+
+### `crond` / `tomcat` / `memcached` 的 init 脚本从来没被装进 chroot
+
+* 实测（`/data/local/tmp/qyt_check_initd2.sh`）chroot 里 `/etc/init.d/` 只有
+  `README`、`bt`、`nginx` 三项。于是逐个服务对账「这个 init 脚本谁给」：
+
+  | 服务 | init 脚本来源 |
+  |---|---|
+  | `bt` `nginx` `mysqld` `php-fpm-82` | 宝塔安装器 / 组件安装脚本 |
+  | `fail2ban` `redis` | 宝塔对应插件 |
+  | `crond` `tomcat` `memcached` | **没有任何上游来源**，只能仓库自己写 |
+
+* 后果不是报错，是**静默跳过**：`module/service.sh` 的 `start_svc` 在
+  `/etc/init.d/<名字>` 不存在时只打印一行「跳过」，然后什么都不发生。
+  `crond` 还有 `/usr/sbin/crond` 兜底，`tomcat` 和 `memcached` **没有兜底** ——
+  也就是 Tomcat、Memcached 永远起不来，而启动日志看着一切正常。
+* `install/crond.initd` 和 `install/tomcat.initd` **早就在仓库里，但没有任何脚本引用它们**，
+  只出现在文档里。现在 `install/qiyuntai-install.sh` 的 `step_patch` 会把它们
+  `cp` 进 `$ROOT/etc/init.d/` 并 `chmod 755`。
+* 同一次对账里发现 `memcached` 连 `.initd` 都没有，补了 `install/memcached.initd`
+  （openEuler 的 memcached 包只带 systemd 单元，chroot 里没有 systemd；宝塔那 9 个插件
+  里也没有 memcached 插件），一并纳入 `step_patch` 的安装清单。
+
+---
+
 ## v1.2.4 — 2026-09-21
 
 `versionCode = 10204`

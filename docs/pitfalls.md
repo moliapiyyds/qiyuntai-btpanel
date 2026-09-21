@@ -153,6 +153,27 @@ ipset v7.19: Kernel error received: Invalid argument
 * 在宿主用 `adb shell "su -c '...'"` 拼复杂命令极易被引号吃掉，
   可靠做法是**把脚本 push 上去再执行**。
 
+### 6. `crond` / `tomcat` / `memcached` 的 init 脚本没有任何上游来源
+实测：chroot 的 `/etc/init.d/` 里只有 `README`、`bt`、`nginx`。把模块要拉起的 11 项
+服务逐个对「它的 `/etc/init.d/<名>` 谁提供」：
+
+| 服务 | init 脚本来源 |
+|---|---|
+| `bt` `nginx` `mysqld` `php-fpm-82` | 宝塔安装器 / 组件安装脚本 |
+| `fail2ban` `redis` | 宝塔对应插件 |
+| `crond` `tomcat` `memcached` | **没有上游来源** |
+
+* openEuler 的 `memcached` 包只带 `/usr/lib/systemd/system/` 单元，chroot 里没有 systemd；
+  宝塔那 9 个插件里也没有 memcached 插件；面板包里更没有这个 init 脚本。
+* 失败方式是**静默**的：`module/service.sh` 的 `start_svc` 见不到
+  `/etc/init.d/<名>` 就打印一行「跳过」然后返回，**不报错、不返回非零**。
+  `crond` 还有 `/usr/sbin/crond` 兜底，`tomcat` 和 `memcached` 没有 ——
+  结果是这两个服务永远起不来，而开机日志看起来完全正常。
+* 所以 `install/{crond,tomcat,memcached}.initd` 由仓库自己提供，
+  在 `install/qiyuntai-install.sh` 的 `step_patch` 里 `cp` 进 `$ROOT/etc/init.d/` 并 `chmod 755`。
+  **注意**：只把 `.initd` 放进仓库是不生效的 —— 在接上 `step_patch` 之前，
+  `crond.initd` / `tomcat.initd` 就在仓库里躺了很久，但没有任何脚本引用它们。
+
 ---
 
 ## 三、MariaDB 起不来？两个 Android 特有的坑（都踩过）

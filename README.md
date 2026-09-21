@@ -295,8 +295,9 @@ install/                 设备上执行的部署脚本
   qiyuntai-install.sh     一键装：rootfs → 挂载 → 面板 → 组件 → 补丁 → 模块
   chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
   android-network-fix.sh  paranoid-network 的 inet 组修正
-  crond.initd             chroot 缺这两个 init 脚本，crond/tomcat 起不来
-  tomcat.initd
+  crond.initd             chroot 没有 systemd、宝塔也不给这三个，缺了就起不来
+  tomcat.initd           （install/qiyuntai-install.sh 的 patch 步骤会装进 /etc/init.d）
+  memcached.initd
   lib-shim.sh            替换面板原版 lib.sh 的最小依赖兜底（避免重复编译 openssl/mcrypt）
   bt-panel-install.exp   驱动宝塔官方安装器：分配 pty、按「提示内容」作答（不依赖提问顺序）
   installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单
