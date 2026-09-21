@@ -144,18 +144,29 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 
 ### 分步部署（想自己控制的用这个）
 
+> **推到 `/data/local/tmp` 而不是 `/sdcard`**：`/sdcard` 是 **CE 存储**
+> （`ro.crypto.state=encrypted`、`ro.crypto.type=file`），手机**重启后只要没解锁一次**，
+> vold 就不会建 `/mnt/user/0/primary` —— `/sdcard` 直接 "No such file or directory"，
+> adb push 全灭；此时 `/data/media/0` 里只能看到 fscrypt 的 22 字符加密文件名，
+> 看着特别像"存储坏了"，其实只是没解锁。一键部署最后一步就是重启手机，所以这个坑很容易踩。
+> `/data/local/tmp` 是 DE 存储：锁屏能写、重启也在。
+
 ```sh
 # 1) 推文件（install/ module/ tools/ 必须在同一层目录）
-adb push install/ /sdcard/install/
-adb push module/  /sdcard/module/
-adb push tools/   /sdcard/tools/     # step_plugins 要 plugin_install.py、step_patch 要 moli_patch.py
+D=/data/local/tmp/qyt-repo
+adb shell "mkdir -p $D"
+adb push install/ $D/install/
+adb push module/  $D/module/
+adb push tools/   $D/tools/          # step_plugins 要 plugin_install.py、step_patch 要 moli_patch.py
 
 # 2) 体检，不装任何东西
-adb shell "su -c 'sh /sdcard/install/deploy.sh --check'"
+adb shell "su -c 'sh $D/install/deploy.sh --check'"
 
 # 3) 全自动装（--no-reboot 可以装完不重启）
-adb shell "su -c 'sh /sdcard/install/deploy.sh'"
+adb shell "su -c 'sh $D/install/deploy.sh'"
 ```
+
+（`deploy.ps1` 默认就是这么推的；想推到别处用 `-Dest <路径>`。）
 
 `install/deploy.sh` 也可以单独用：
 
@@ -193,7 +204,7 @@ sh tools/make_image.sh --out /data/qyt_image
 # 产出：qyt-image.part-aaa / -aab / …（按 1900MB 分卷，GitHub 单附件上限 2GiB）+ SHA256SUMS.txt
 
 # 用镜像装（设备上跑；目录里放分卷）
-sh install/deploy.sh --from-image /sdcard/qyt_image
+sh install/deploy.sh --from-image /data/qyt_image
 ```
 
 * 跳过 **dnf + 全部源码编译**，从 ~2 小时降到 **~10 分钟**，且不连宝塔的服务器
@@ -213,13 +224,14 @@ sh install/deploy.sh --from-image /sdcard/qyt_image
 & gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'qyt-image*' --dir .\qyt_image
 & gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'SHA256SUMS.txt' --dir .\qyt_image
 
-# 2) 推到手机（几 GB 走 USB，耐心等）
-adb shell "su -c 'mkdir -p /sdcard/qyt_image'"
-adb push .\qyt_image\. /sdcard/qyt_image/
+# 2) 推到手机（几 GB 走 USB，耐心等；同样推 /data/local/tmp，不用 /sdcard）
+adb shell "mkdir -p /data/local/tmp/qyt_image"
+adb push .\qyt_image\. /data/local/tmp/qyt_image/
 
 # 3) 手机上：先空出 /data/openeuler，再从镜像铺
-adb shell "su -c 'sh /sdcard/install/prepare-rootfs.sh --clean'"
-adb shell "su -c 'sh /sdcard/install/deploy.sh --from-image /sdcard/qyt_image'"
+D=/data/local/tmp/qyt-repo
+adb shell "su -c 'sh $D/install/prepare-rootfs.sh --clean'"
+adb shell "su -c 'sh $D/install/deploy.sh --from-image /data/local/tmp/qyt_image'"
 ```
 
 `--from-image` 会自己 `cat` 分卷 → 重算 sha256 与 `SHA256SUMS.txt` 比对 →

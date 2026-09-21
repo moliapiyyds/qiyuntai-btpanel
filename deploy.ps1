@@ -8,16 +8,17 @@
 #
 # 它做四件事：
 #   1) 找 adb、等设备、确认手机上能拿到 root
-#   2) 把 install/ module/ tools/ 推到手机（必须在同一层目录）
+#   2) 把 install/ module/ tools/ 推到手机（必须在同一层目录），
+#      默认推到 /data/local/tmp/qyt-repo —— **不是 /sdcard**，原因见下面「推送到哪」那段
 #      tools/ 是必须的：step_plugins 要用 tools/plugin_install.py、
 #      step_patch 要用 tools/moli_patch.py
 #   3) 在手机上跑 install/deploy.sh —— 剩下的全自动：
 #        铺 rootfs → 装面板 → 装组件（源码编译 OpenResty/MariaDB/PHP/phpMyAdmin）
-#        → 装 9 个面板插件 → 打补丁 → 装 KernelSU 模块 → 重启
+#        → 装 9 个面板插件 → 基线包对齐 → 打补丁 → 装 KernelSU 模块 → 重启
 #      耗时约 2 小时（MariaDB 编译峰值约 2 GB 内存）。
 #      装第二台可以先打预制镜像再用 deploy.sh --from-image，约 10 分钟：
 #        sh tools/make_image.sh --out /data/qyt_image
-#        sh install/deploy.sh --from-image /sdcard/qyt_image
+#        sh <Dest>/install/deploy.sh --from-image /data/qyt_image
 #   4) 收尾提示
 #
 # 参数：
@@ -25,6 +26,7 @@
 #   -PushOnly     只推文件到手机，不安装
 #   -NoReboot     装完不自动重启手机
 #   -Adb <path>   指定 adb 路径（默认自动找）
+#   -Dest <path>  推到哪儿（默认 /data/local/tmp/qyt-repo；手机已解锁时 /sdcard/qyt-repo 也行）
 #
 # 关于 root：脚本先试 `adb shell id`，已经是 uid=0 就直接执行；
 # 否则才退回 `su -c`。两种都拿不到 root 才报错。
@@ -41,12 +43,23 @@ param(
     [switch]$Check,
     [switch]$PushOnly,
     [switch]$NoReboot,
-    [string]$Adb = ''
+    [string]$Adb = '',
+    [string]$Dest = ''
 )
 
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:SU = ''
+
+# 推送到哪：默认 /data/local/tmp/qyt-repo。
+# 为什么不用 /sdcard（2026-09-22 实测踩到）：/sdcard 是 **CE 存储**
+#   （ro.crypto.state=encrypted、ro.crypto.type=file），手机重启后只要没解锁一次，
+#   vold 就不会建 /mnt/user/0/primary，`/sdcard` 直接 "No such file or directory"，
+#   adb push 全灭（而是 /data/media/0 里只能看到 fscrypt 的 22 字符加密文件名，
+#   看着像"存储坏了"，其实是没解锁）。
+#   一键部署的最后一步就是重启手机 —— 所以「装完再推一次」必然踩到。
+#   /data/local/tmp 是 DE 存储：锁屏能写、重启也在。
+if (-not $Dest) { $Dest = '/data/local/tmp/qyt-repo' }
 
 # 自引用提示：从别的目录调用（例如 %TEMP%）时，要给能直接复制的完整路径
 $hint = if ((Get-Location).Path.TrimEnd('\') -eq $RepoRoot.TrimEnd('\')) { '.\deploy.ps1' } else { "& `"$RepoRoot\deploy.ps1`"" }
@@ -146,32 +159,40 @@ if ($Check) {
 # ---------- 4) 推文件 ----------
 Write-Host ""
 Write-Host "---- 推送到手机 ----"
-RemoteRun "mkdir -p /sdcard/install /sdcard/module /sdcard/tools" | Out-Null
-& $Adb -s $serial push (Join-Path $RepoRoot 'install\.') /sdcard/install/ 2>&1 | Select-Object -Last 1
-& $Adb -s $serial push (Join-Path $RepoRoot 'module\.')  /sdcard/module/  2>&1 | Select-Object -Last 1
+# 推到哪儿：默认 /data/local/tmp/qyt-repo，**不是 /sdcard**（2026-09-22 实测踩到）。
+# /sdcard 是 CE 存储（ro.crypto.state=encrypted、type=file）：手机重启后只要**没解锁一次**，
+# vold 就不建 /mnt/user/0/primary，`/sdcard` 直接 "No such file or directory"，
+# adb push 全部失败。而一键部署的最后一步就是重启手机 ——
+# 于是「装完再推一次」这种操作必然踩到。/data/local/tmp 是 DE 存储，锁屏也能写、重启也在。
+# 想用 /sdcard（手机已解锁时也能用）：.\deploy.ps1 -Dest /sdcard/qyt-repo
+RemoteRun "mkdir -p $Dest/install $Dest/module $Dest/tools" | Out-Null
+& $Adb -s $serial push (Join-Path $RepoRoot 'install\.') "$Dest/install/" 2>&1 | Select-Object -Last 1
+& $Adb -s $serial push (Join-Path $RepoRoot 'module\.')  "$Dest/module/"  2>&1 | Select-Object -Last 1
 # tools/ 也必须推：install/qiyuntai-install.sh 的 step_plugins 要用
 # tools/plugin_install.py、step_patch 要用 tools/moli_patch.py。
 # 以前没推 tools/，那两步会因为找不到文件而失败（而且 step_plugins 原来只装 fail2ban，
-# 失败还可能被忽略过去）。实测 /sdcard/tools 之前是空的。
-& $Adb -s $serial push (Join-Path $RepoRoot 'tools\.')   /sdcard/tools/   2>&1 | Select-Object -Last 1
-RemoteRun "chmod 755 /sdcard/install/*.sh /sdcard/module/*.sh /sdcard/tools/*.sh" | Out-Null
+# 失败还可能被忽略过去）。
+& $Adb -s $serial push (Join-Path $RepoRoot 'tools\.')   "$Dest/tools/"   2>&1 | Select-Object -Last 1
+RemoteRun "chmod 755 $Dest/install/*.sh $Dest/module/*.sh $Dest/tools/*.sh" | Out-Null
 # 数文件个数在 PowerShell 这边做：命令里写 $(...) 会被 PS 本地展开，传不过去
-$nIns = @((RemoteRun "ls /sdcard/install") | Where-Object { $_ -and $_.Trim() }).Count
-$nMod = @((RemoteRun "ls /sdcard/module")  | Where-Object { $_ -and $_.Trim() }).Count
-$nTool = @((RemoteRun "ls /sdcard/tools")  | Where-Object { $_ -and $_.Trim() }).Count
-Ok "已推送：install/ $nIns 个，module/ $nMod 个，tools/ $nTool 个（并已置执行位）"
-if ($nIns -lt 5 -or $nMod -lt 5 -or $nTool -lt 3) { Die "推送数量不对，检查 adb push 输出" }
+$nIns = @((RemoteRun "ls $Dest/install") | Where-Object { $_ -and $_.Trim() }).Count
+$nMod = @((RemoteRun "ls $Dest/module")  | Where-Object { $_ -and $_.Trim() }).Count
+$nTool = @((RemoteRun "ls $Dest/tools")  | Where-Object { $_ -and $_.Trim() }).Count
+Ok "已推送：$Dest/install $nIns 个，module $nMod 个，tools $nTool 个（并已置执行位）"
+if ($nIns -lt 5 -or $nMod -lt 5 -or $nTool -lt 3) {
+    Die "推送数量不对（install=$nIns module=$nMod tools=$nTool），检查 adb push 输出。若目标在 /sdcard，先确认手机已解锁一次（/sdcard 是 CE 存储，锁屏时不可用）"
+}
 # 缺这两个，step_plugins / step_patch 必然失败，早报比晚报好
 foreach ($need in @('plugin_install.py', 'moli_patch.py')) {
-    $r = RemoteRun "test -f /sdcard/tools/$need && echo yes || echo no"
-    if (($r | Out-String) -notmatch 'yes') { Die "手机上缺 /sdcard/tools/$need —— step_plugins/step_patch 会失败" }
+    $r = RemoteRun "test -f $Dest/tools/$need && echo yes || echo no"
+    if (($r | Out-String) -notmatch 'yes') { Die "手机上缺 $Dest/tools/$need —— step_plugins/step_patch 会失败" }
 }
 
 if ($PushOnly) {
     Write-Host ""
     Write-Host "---- -PushOnly：文件已推好，没有安装 ----"
     Write-Host "继续（手机上执行）："
-    Write-Host "   $Adb -s $serial shell `"sh /sdcard/install/deploy.sh`""
+    Write-Host "   $Adb -s $serial shell `"sh $Dest/install/deploy.sh`""
     Write-Host "或者在这里直接跑： $hint"
     exit 0
 }
@@ -184,7 +205,8 @@ Write-Host "     MariaDB 编译峰值约 2 GB 内存，装之前最好清一下�
 Write-Host ""
 $extra = ''
 if ($NoReboot) { $extra = ' --no-reboot' }
-RemoteRun "sh /sdcard/install/deploy.sh$extra"
+RemoteRun "sh $Dest/install/deploy.sh$extra"
+$rc = $LASTEXITCODE
 $rc = $LASTEXITCODE
 
 Write-Host ""

@@ -71,12 +71,12 @@ step_rootfs() {
         return 0
     fi
 
-    # 兜底：脚本被单独推到 /sdcard（拿不到仓库目录）时走这段内置逻辑
+    # 兜底：脚本被单独推到手机（拿不到仓库目录）时走这段内置逻辑
     log "没找到 $pr，走内置逻辑"
     command -v curl >/dev/null 2>&1 || fail "这台设备没有 curl（Android 9 toybox 不带）。改为在电脑上下好后推过来：
       xz -d openEuler-docker.aarch64.tar.xz
-      adb push openEuler-docker.aarch64.tar /sdcard/
-      adb shell su -c \"sh /sdcard/prepare-rootfs.sh --tar /sdcard/openEuler-docker.aarch64.tar\""
+      adb push openEuler-docker.aarch64.tar /data/local/tmp/
+      adb shell su -c \"sh /data/local/tmp/install/prepare-rootfs.sh --tar /data/local/tmp/openEuler-docker.aarch64.tar\""
     command -v xz >/dev/null 2>&1 || fail "这台设备没有 xz。改为在电脑上先 xz -d，再按上面的方式推 .tar 过来。"
 
     mkdir -p "$TMP"

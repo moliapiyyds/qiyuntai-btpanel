@@ -4,8 +4,9 @@
 # 作者：茉莉  QQ:1265274322  官方Q群:570387739
 # ------------------------------------------------------------
 # 在手机 root shell 里跑，一条命令从零到能用：
-#   su -c 'sh /sdcard/install/deploy.sh'        # deploy.ps1 推上去的位置
-#   su -c 'sh /data/local/tmp/qiyuntai/install/deploy.sh'   # 自己放别处也行，路径随意
+#   su -c 'sh /data/local/tmp/qyt-repo/install/deploy.sh'   # deploy.ps1 默认推的位置
+#   （放 /sdcard/install/deploy.sh 也行，但 /sdcard 是 CE 存储 ——
+#     手机重启后没解锁一次就 "No such file or directory"，见 README）
 #
 # 它会：
 #   1) 前置检查（root / aarch64 / 磁盘空间 / 工具 / SELinux）
@@ -191,16 +192,19 @@ else
             echo
             echo "      .\\deploy.ps1"
             echo
-            echo "  或者手动推过来："
+            echo "  或者手动推过来（推 /data/local/tmp —— /sdcard 是 CE 存储，"
+            echo "  手机重启后没解锁一次就不可用）："
             echo
             echo "      git clone https://github.com/$REPO_SLUG.git"
-            echo "      adb push qiyuntai-btpanel/install/. /sdcard/install/"
-            echo "      adb push qiyuntai-btpanel/module/.  /sdcard/module/"
-            echo "      adb shell \"su -c 'sh /sdcard/install/deploy.sh'\""
+            echo "      D=/data/local/tmp/qyt-repo; adb shell \"mkdir -p \$D\""
+            echo "      adb push qiyuntai-btpanel/install/. \$D/install/"
+            echo "      adb push qiyuntai-btpanel/module/.  \$D/module/"
+            echo "      adb push qiyuntai-btpanel/tools/.   \$D/tools/"
+            echo "      adb shell \"su -c 'sh \$D/install/deploy.sh'\""
             echo
             echo "  也可以把仓库打包推上来后用 --repo-tar 指定："
-            echo "      adb push main.tar.gz /sdcard/"
-            echo "      sh $0 --repo-tar /sdcard/main.tar.gz"
+            echo "      adb push main.tar.gz /data/local/tmp/"
+            echo "      sh $0 --repo-tar /data/local/tmp/main.tar.gz"
             exit 1
         fi
     fi

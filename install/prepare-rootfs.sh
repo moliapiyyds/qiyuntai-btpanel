@@ -281,8 +281,8 @@ if [ -n "$SRC_XZ" ]; then
             echo "x xz 解压失败。"
             echo "  这台设备的 tar/xz 可能不支持 xz。请在电脑上先解好再推进来："
             echo "    xz -d openEuler-docker.aarch64.tar.xz"
-            echo "    adb push openEuler-docker.aarch64.tar /sdcard/"
-            echo "    adb shell su -c \"sh $0 --tar /sdcard/openEuler-docker.aarch64.tar\""
+            echo "    adb push openEuler-docker.aarch64.tar /data/local/tmp/"
+            echo "    adb shell su -c \"sh $0 --tar /data/local/tmp/openEuler-docker.aarch64.tar\""
             exit 1
         fi
     fi
@@ -410,9 +410,10 @@ echo "      下一步安装脚本要 chroot 进去用。如果你要删掉这个
 echo "        sh $0 --root $ROOT --unmount"
 echo "      （不然 rm -rf 会报 \"Device or resource busy\"；重跑本脚本会自动先解挂载）"
 echo ""
-echo "下一步（在电脑上执行）："
-echo "  1) adb push install/qiyuntai-install.sh /sdcard/"
-echo "  2) adb shell su -c \"sh /sdcard/qiyuntai-install.sh\"     # chroot 内装面板 + 组件 + 打补丁"
+echo "下一步（推荐直接跑 `./deploy.ps1`；手工的话）："
+echo "  1) adb push install/. module/. tools/. 到同一个目录，例如"
+echo "     D=/data/local/tmp/qyt-repo   （/sdcard 是 CE 存储，重启后没解锁时不可用）"
+echo "  2) adb shell su -c \"sh \$D/install/qiyuntai-install.sh all\"   # 面板 + 组件 + 插件 + 补丁"
 echo "  3) 刷 KernelSU 模块 qiyuntai_btpanel，重启"
 echo "  4) 重启后点模块的「执行」按钮拿地址账号密码"
 echo "=========================================================="
