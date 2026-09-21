@@ -44,7 +44,7 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 | --- | --- |
 | 底层 | openEuler 24.03 LTS-SP3 aarch64 chroot，落在 `/data/openeuler`（**实测装完 17.7 GB**，其中 MariaDB 编译构建树 `www/server/mysql/src` 占 8.8 GB，删掉可回收） |
 | 面板 | 宝塔面板 **13.0.0**（aarch64 版），端口/入口**安装时随机**（每台机器不同，见下文「怎么访问」），已解锁**永久企业版**、**关闭更新**、**免 bt.cn 绑定** |
-| 环境组件 | **OpenResty 1.31.1.1**、**MariaDB 10.11.16**、**PHP 8.2.33**、**phpMyAdmin 5.2**、**Redis 7.2.16**、**Memcached 1.6.45**、**Tomcat 9.0**、**Supervisor 4.2.4** |
+| 环境组件 | **OpenResty 1.31.1.1**、**MariaDB 10.11.16**、**PHP 8.2.33**、**phpMyAdmin 5.2**、**Redis 8.0.6**（宝塔 redis 插件当前版本）、**Memcached 1.6.45**、**Tomcat 9.0**（9.0.62，Apache 归档）、**Supervisor 4.2.4** |
 | 管理插件 | Fail2ban 2.6、Node.js版本管理器 2.8（内置 node **v20.18.3**）、java环境管理器 / jdk_manager（内置 JDK **17.0.20.8**）、Python项目管理器（`pythonmamager`）、python环境管理器（`pyenv_manager`）、Supervisor 进程管理器、Tomcat（`tomcat2`）、Redis |
 | 额外环境 | Python 3.13.14 + pip/venv、OpenJDK 17.0.20.8 / 11.0.32.9 / 1.8.0_502、Node.js **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `/usr/bin/node`）+ npm 10.8.2、git/vim/htop/tmux/jq/sqlite3、完整编译链、iptables-legacy |
 | 开机自启 | KernelSU 模块 `qiyuntai_btpanel`：挂 chroot → 写 DNS → 修正 Android 网络限制 → 依次拉起 **11 项**：面板/nginx/MariaDB/PHP-FPM/Fail2ban/crond/Redis/Memcached/Tomcat + supervisord + sshd（adb 不通时的兜底通道） → 自检 |

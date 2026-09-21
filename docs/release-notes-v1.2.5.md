@@ -152,7 +152,7 @@ adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.5.
 |---|---|
 | 面板 | 宝塔 **13.0.0**（改造后永久企业版、关闭更新、免绑定） |
 | 组件 | OpenResty **1.31.1.1** / MariaDB **10.11.16** / PHP **8.2.33** / phpMyAdmin **5.2** |
-| 缓存与队列 | Redis **7.2.16**（插件版）/ Memcached **1.6.45**（宝塔源码包编） |
+| 缓存与队列 | Redis **8.0.6**（宝塔 redis 插件当前版本；基线那台是 7.2.16，商店已下架）/ Memcached **1.6.45**（宝塔源码包编） |
 | Tomcat | **9.0**（`catalina.jar` 9.0.62） |
 | 面板插件 | **9 个**：fail2ban redis tomcat2 supervisor nodejs java_manager jdk_manager pyenv_manager pythonmamager |
 | 开机服务 | **11 项**：bt nginx mysqld php-fpm-82 fail2ban crond redis memcached tomcat + supervisord + sshd |

@@ -45,6 +45,57 @@
   实测宝塔下载站上 **只有** `memcached-1.6.45.tar.gz` 返回 200（1.6.22 / 1.6.38 都是 404），
   所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
   （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
+* **memcached 起不来的真因（实测定位）**：它的 init 脚本用 `-u memcached` 起
+  （memcached 拒绝以 root 跑），而它降权时只做 `setgid/setuid`、**不带附加组**
+  （`/proc/<pid>/status` 的 `Groups:` 是空的），于是 Android 的 paranoid-network
+  过不去，bind 127.0.0.1:11211 报 `Permission denied` —— 而 init 脚本把输出吞了，
+  只留一句「memcached 启动失败」。三种写法实测：
+  「主组改 inet + `-u memcached`」成功、「`-u root`」成功、「只加附加组」失败。
+  所以把 `memcached` 的**主组**改成 `inet`（三处：step_memcached / android-network-fix.sh /
+  service.sh 开机兜底）。
+
+### Tomcat 也是「没有任何来源」：插件只装插件文件
+
+* 装完 9 个插件后 `/www/server/tomcat` **根本不存在**。原因：
+  这个面板版本的 `install/` 下没有 tomcat 安装脚本（只有 install_soft.sh / public.sh /
+  nginx.sh / fix_install.sh / d_node.pl），`class/tomcat.py` 只管 vhost，
+  tomcat2（Java项目管理器）插件的 `install.sh` 是个空壳（正文就是 `echo '安装完成'`）。
+  于是 `service.sh` 的 `start_svc tomcat` 永远「跳过」，而文档写着 Tomcat 9.0 是有的。
+* 新增 `step_tomcat`：从 `archive.apache.org` 取 **apache-tomcat-9.0.62.tar.gz**
+  （与基线 `catalina.jar` 的 9.0.62 同版本；实测该 URL 200，而 download.bt.cn 上
+  几个 tomcat 路径都是 404、dlcdn/tuna 只留最新版），解到 `/www/server/tomcat`。
+* 顺带修 `install/tomcat.initd` 的 `JAVA_HOME`：原来写死 `/www/server/java/jdk-17.0.8`
+  —— 基线那台的目录是 `java-17-openjdk-17.0.20.8`，写死的那个根本不存在，
+  一直靠回退侥幸能用；现在按「宝塔装的 JDK → rpm 的 OpenJDK → `/usr/bin/java` 反查」顺序找。
+
+### redis 插件装不上：`plugin_install.py` 的两个坑
+
+* **假跳过**：原来只看 `install_checks` 路径在不在。redis 的 `install_checks` 指的是
+  **软件**路径 `/www/server/redis/runtest`（源码在那儿但没编译），那个文件在 →
+  直接「已经安装过了，跳过」→ 插件的文件一个都没解包，面板里点开 redis 是 404，
+  `/etc/init.d/redis` 也不存在。现在要求「install_checks **且** 插件目录」都在才算装过。
+* **异步任务**：redis 走的是面板的任务队列，第一步只返回
+  `{"status": true, "msg": "已将安装任务添加到队列!"}`，`temp/` 不会立刻出现 ——
+  旧代码直接判「临时目录不存在，安装中止」。现在会等插件目录出现（`PLUGIN_WAIT`，默认 900 秒）。
+* 结果：redis 插件装好，`redis-server`（**8.0.6**，店里的当前版本）+ `/etc/init.d/redis` 都在。
+
+### `/sdcard` 是 CE 存储：手机重启后没解锁就推不上去
+
+* 一键部署最后一步是 `reboot`，重启后手机停在锁屏 → vold 不建 `/mnt/user/0/primary` →
+  `/sdcard` 直接 “No such file or directory”，`adb push` 全灭；此时 `/data/media/0` 里
+  只能看到 fscrypt 的 22 字符加密名，**看着很像「存储坏了」**（详见 pitfalls §六.6）。
+* 修法：推送/执行目录从 `/sdcard` 换成 **`/data/local/tmp/qyt-repo`**（DE 存储，锁屏可写），
+  `deploy.ps1` 新增 `-Dest`；README / module/customize.sh / install/*.sh 里的路径与提示同步改。
+
+### `install/qiyuntai-install.sh` 自己的两个 bug（都是「静默」型的）
+
+* 用了 18 处 `warn` 但从没定义过它 —— 每条警告都是 `sh: warn: not found`，一条都打不出来
+  （shellcheck 不管这个：它分不清「函数」还是「外部命令」）。
+* 一次「删空行」的编辑把两行粘成了一行：
+  `log "装 chroot 服务兼容层（…）"    sh "$REPO_DIR/install/chroot-compat-layer.sh"` ——
+  语法完全合法，于是 `chroot-compat-layer.sh` **永远不会被执行**，
+  兼容层（systemctl/service/start-stop-daemon/iptables-legacy）一个都不会装。
+  `sh -n` 和 shellcheck 都拦不住这类错误。
 
 ### 面板自己会开 SSL，明文 http 连不上（这轮最毒的一个坑）
 

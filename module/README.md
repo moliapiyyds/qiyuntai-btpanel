@@ -156,8 +156,8 @@ bt 6      # 修改面板入口
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin` |
 | Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 已实测可封禁/解封 IP |
 | 管理插件 | 共 **9 个**：`fail2ban` / `redis` / `tomcat2` / `supervisor` / `nodejs` / `java_manager` / `jdk_manager` / `pyenv_manager` / `pythonmamager` | 走宝塔插件下载接口装的（`tools/plugin_install.py`），面板「软件商店 → 已安装」里能正常显示、能启停。上面表里的 Redis / Tomcat / Supervisor / Node.js / JDK 都是这些插件提供的，不是 dnf 装的 |
-| Redis | **7.2.16** | 由 `redis` 插件装到 `/www/server/redis`（dnf 源里那份是 7.2.15，装了也是兜底，不跑） |
-| Tomcat | **9.0** | 插件 `tomcat2` |
+| Redis | **8.0.6** | 由 `redis` 插件装到 `/www/server/redis`（店里的当前版本；基线那台是 7.2.16，那个版本商店已下架。dnf 源里那份是 7.2.15，装了也是兜底、不跑） |
+| Tomcat | **9.0**（9.0.62） | 面板**不带** tomcat 安装脚本（tomcat2 插件只装插件文件），由部署脚本从 Apache 归档取 apache-tomcat-9.0.62.tar.gz 解到 `/www/server/tomcat` |
 | Supervisor | **4.2.4** | 进程守护管理器 |
 | Memcached | **1.6.45** | 宝塔源码包编到 `/usr/local/memcached`（面板判断它装没装就是看这个路径）；dnf 源里那份 1.6.22 只在编不出来时兜底 |
 | Python | **3.13.14**（面板 pyenv）+ 系统 python3 + pip/venv | |

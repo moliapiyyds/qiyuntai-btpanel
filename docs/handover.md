@@ -39,7 +39,7 @@
 | PHP | **8.2.33** | `php -v` → 8.2.33，php-fpm 运行，`/tmp/php-cgi-82.sock` |
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin/version.pl` = 5.2 |
 | Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 封禁 203.0.113.9 → `f2b-sshd` 规则出现 → 解封消失 |
-| Redis | **7.2.16**（宝塔托管） | `PONG`，监听 127.0.0.1:6379 |
+| Redis | **8.0.6**（宝塔 redis 插件装的；基线那台是 7.2.16，商店已下架） | `redis-server -v`，监听 127.0.0.1:6379 |
 | Node.js 管理器 | 2.8（宝塔插件） | 插件 `info.json` 的 `versions` = 2.8，商店显示已安装/运行中 |
 | Tomcat | **9.0** | `catalina.jar` MANIFEST 的 `Specification-Version: 9.0`，插件名 `tomcat2` |
 | Supervisor | **4.2.4** | `supervisord --version` |
@@ -259,7 +259,7 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 | MariaDB | 10.11.16 | `10.11.16-MariaDB-log for Linux on aarch64` | 一致 |
 | PHP | 8.2.33 | `PHP 8.2.33 (NTS)` | 一致 |
 | phpMyAdmin | 5.2 | `/www/server/phpmyadmin/version.pl` = `5.2` | 一致 |
-| Redis | 7.2.16 | `Redis server v=7.2.16` | 一致 |
+| Redis | 7.2.16（2026-09-21 基线） | `Redis server v=7.2.16` | 一致；**2026-09-22 重装时商店只给 8.x 了**，见 §十 |
 | Node.js 管理器 | 2.8 | 插件 `info.json` 的 `versions` = `2.8` | 一致 |
 | Fail2ban 插件 | 2.6 | 插件 `info.json` 的 `versions` = `2.6` | 一致 |
 | **Fail2ban 上游** | **1.1.0** | **`Fail2Ban v1.1.1.dev1`** | **已改正** |
