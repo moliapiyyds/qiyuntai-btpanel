@@ -83,14 +83,32 @@ ok "没有挂载残留（$ROOT/ 下 0 个）"
 [ -x "$ROOT/www/server/panel/BT-Panel" ] || die "面板没装好（找不到 BT-Panel）"
 
 # 2) 组件必须都编译完，否则冻出来的是个半成品
+#
+# 路径不能用 chroot 内那套：/www/server/nginx/sbin 是
+# `sbin -> /www/server/nginx/nginx/sbin` 的**绝对软链**，chroot 内能通、
+# 宿主侧不通（本脚本是宿主侧跑的）。实测直接判断 /www/server/nginx/sbin/nginx
+# 会误报"组件没编译完"。所以：候选真实路径 -> 再 find 兜底。
+resolve_bin() {
+    for p in "$@"; do
+        [ -e "$ROOT/$p" ] && { echo "$p"; return 0; }
+    done
+    echo ""
+}
+NGX=$(resolve_bin www/server/nginx/nginx/sbin/nginx www/server/nginx/sbin/nginx)
+[ -n "$NGX" ] || NGX=$(cd "$ROOT" && find www/server/nginx -maxdepth 4 -type f -name nginx 2>/dev/null | head -1)
+MYD=$(resolve_bin www/server/mysql/bin/mariadbd)
+[ -n "$MYD" ] || MYD=$(cd "$ROOT" && find www/server/mysql -maxdepth 4 -type f -name mariadbd 2>/dev/null | head -1)
+PHPB=$(resolve_bin www/server/php/82/bin/php)
+[ -n "$PHPB" ] || PHPB=$(cd "$ROOT" && find www/server/php -maxdepth 5 -type f -name php 2>/dev/null | head -1)
+
 MISSING=""
-for f in www/server/nginx/sbin/nginx www/server/mysql/bin/mariadbd www/server/php/82/bin/php; do
-    [ -e "$ROOT/$f" ] || MISSING="$MISSING $f"
-done
+[ -n "$NGX" ]  || MISSING="$MISSING nginx"
+[ -n "$MYD" ]  || MISSING="$MISSING mariadbd"
+[ -n "$PHPB" ] || MISSING="$MISSING php"
 if [ -n "$MISSING" ]; then
-    die "这些组件还没编译完，不能冻：$MISSING"
+    die "这些组件还没编译完，不能冻：$MISSING（找过的候选路径见本脚本 resolve_bin）"
 fi
-ok "面板 + nginx + mariadbd + php 都在"
+ok "组件都在：nginx=$NGX  mariadbd=$MYD  php=$PHPB"
 
 # 3) 面板版本（补丁适配判据，写进清单）
 PVER=$(sed -n "s/.*g\.version *= *'\([^']*\)'.*/\1/p" "$ROOT/www/server/panel/class/common.py" 2>/dev/null | head -1)
@@ -191,6 +209,11 @@ MANI="$ROOT/IMAGE-MANIFEST.txt"
     echo "解包目标     : /data/openeuler（tar 里第一层目录名就是 openeuler）"
     echo "解包后要做的 : 解到 /data -> 跑 qiyuntai-install.sh 的 creds/plugins/patch/module"
     echo "               （端口/入口/密码要在那一步重新随机化，不能照用镜像里的）"
+    echo ""
+    echo "--- 组件真实路径（宿主侧视角；chroot 内还有 sbin 软链） ---"
+    echo "nginx    : /$NGX"
+    echo "mariadbd : /$MYD"
+    echo "php      : /$PHPB"
     echo ""
     echo "--- rpm 包数 ---"
     ic "rpm -qa | wc -l" 2>/dev/null
