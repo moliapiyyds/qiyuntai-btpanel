@@ -152,6 +152,8 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 | fail2ban 原 Debian 启动脚本 | `/data/openeuler/etc/init.d/fail2ban.debian-orig` |
 | fail2ban 原 jail.local | `/data/openeuler/etc/fail2ban/jail.local.moli-orig` |
 | 内核备份（此前） | `D:\PAR-AL00_…\my_backup\kernel.img` (md5 `ef5f17daaf4f0173ef5c71df6a706807`) |
+| **删除前那台的整份备份**（2026-09-21 22:14） | 设备上 `/data/qyt_backup_20260921/`：`openeuler.tar.zst` 5,976,843,781 字节 sha256 `51159325d30c3789ca986767482bfde42586120a4597207b78f62c4e0d06d2df`、`BASELINE_pre.txt`（磁盘/目录/组件版本/init.d/端口快照）、`pkglist_pre.txt`（548 条 rpm 清单，已作为 `install/baseline-packages.txt` 进仓库）、`module_qiyuntai_btpanel/`（当时的模块） |
+| **预制镜像**（2026-09-22 重装后产出） | `/data/qyt_image/`：`qyt-image.part-*` 分卷 + `SHA256SUMS.txt` + `IMAGE-MANIFEST.txt`，同时上传到 Release |
 
 ---
 
@@ -217,6 +219,9 @@ bash tools/verify_sync.sh
 
 * 手机总内存 5.83 GB，MariaDB 编译峰值吃掉约 2 GB（编制期间我执行过 `am kill-all` 释放后台内存）；后续装大件前建议先清内存。
 * dnf 装的 Redis（7.2.15）已被宝塔版（7.2.16）接管，包还在，没跑；如需干净可 `dnf remove redis`。
+* Memcached 同理但方向相反：**dnf 源里只有 1.6.22**，基线要的是 1.6.45，所以
+  `step_memcached` 从宝塔源码包编到 `/usr/local/memcached`（面板判断它装没装就是看这个路径）；
+  dnf 那份只在源码包下架、编不出来时兜底，且日志里会明说版本不同。
 
 ---
 

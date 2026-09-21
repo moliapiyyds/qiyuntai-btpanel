@@ -264,10 +264,18 @@ if [ -n "$IMAGE_SRC" ]; then
     say "解包到 /data（约 1-3 分钟）"
     $BB xz -dc "$ARCH" | $BB tar -x -C /data || die "解包失败"
     [ -x "$ROOT/www/server/panel/BT-Panel" ] || die "解包完了但没找到 $ROOT/www/server/panel/BT-Panel"
+    # 拼接出来的整包用完就删：它有几 GB，留着白占 /data（而且下次会重新拼）
+    rm -f "$ARCH" && say "已删除拼接出来的 $ARCH"
     # 留个标记：凭据那一步要据此重新随机化端口/入口/用户名
     touch "$ROOT/.from-image"
     ok "镜像已解包"
-    [ -f "$ROOT/IMAGE-MANIFEST.txt" ] && { echo "  --- 镜像清单 ---"; sed 's/^/    /' "$ROOT/IMAGE-MANIFEST.txt"; }
+    # 清单优先看镜像目录（make_image.sh 现在把它写在镜像外面）；
+    # 老镜像是写在里面的（$ROOT/IMAGE-MANIFEST.txt），所以两条都试
+    if [ -f "$IMAGE_SRC/IMAGE-MANIFEST.txt" ]; then
+        echo "  --- 镜像清单 ---"; sed 's/^/    /' "$IMAGE_SRC/IMAGE-MANIFEST.txt"
+    elif [ -f "$ROOT/IMAGE-MANIFEST.txt" ]; then
+        echo "  --- 镜像清单（旧格式，在镜像里）---"; sed 's/^/    /' "$ROOT/IMAGE-MANIFEST.txt"
+    fi
 else
 echo
 echo "---- 铺 openEuler rootfs ----"
@@ -289,11 +297,14 @@ fi
 # ---------- 4) 装面板 + 组件 + 插件 + 补丁 + 模块 ----------
 echo
 if [ -n "$IMAGE_SRC" ]; then
-    echo "---- 镜像已就位：重新随机化身份 + 打补丁 + 装模块 ----"
+    echo "---- 镜像已就位：重新随机化身份 + 对齐包清单 + 打补丁 + 装模块 ----"
     say "面板与组件已经在镜像里编译好了，跳过 dnf 和源码编译"
-    # 注意顺序：先 creds（会重新随机化端口/入口/用户名），再 plugins/patch/module。
-    # 补丁最后打，是因为镜像里存的是**未打补丁的原版**（见 tools/make_image.sh 的说明）。
-    for st in creds plugins patch module; do
+    # 注意顺序：先 creds（会重新随机化端口/入口/用户名与 sshd 主机密钥），
+    # 再 plugins（9 个插件都在镜像里，会逐个跳过；顺带确认 memcached 二进制在）
+    # → parity（按基线包清单核对一遍，镜像里是全的，正常情况下什么都不装）
+    # → patch、module。补丁最后打，是因为镜像里存的是**未打补丁的原版**
+    #   （见 tools/make_image.sh 的说明）。
+    for st in creds plugins parity patch module; do
         say "== 步骤：$st =="
         sh "$REPO/install/qiyuntai-install.sh" "$st" || die "$st 步骤失败（看上面日志）"
     done

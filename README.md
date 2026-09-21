@@ -162,7 +162,7 @@ adb shell "su -c 'sh /sdcard/install/deploy.sh'"
 | `--repo-tar <文件>` | 仓库用本地已推过来的 tar.gz，不连 GitHub |
 | `--url <tar.xz>` | rootfs 走指定 URL |
 | `--tar <文件>` | rootfs 用本地已解压好的 docker tar |
-| `--from-image <目录>` | **用预制镜像铺环境**（目录里放 `qyt-image.part-*`）：跳过 dnf 和全部源码编译，约 10 分钟 |
+| `--from-image <目录>` | **用预制镜像铺环境**（目录里放 `qyt-image.part-*`）：跳过 dnf 和全部源码编译，约 10 分钟；铺完会重随机化端口/入口/用户名与 sshd 主机密钥，并按基线包清单核对一遍（镜像里是全的，正常什么都不装） |
 | `--image-sha <sha>` | 额外指定镜像整包 sha256（不给就用目录里的 `SHA256SUMS.txt`） |
 | `--no-reboot` | 装完不重启 |
 
