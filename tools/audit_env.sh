@@ -30,6 +30,8 @@ fi
 CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
 # 注意 2>&1：`nginx -v` / `java -version` 这类是往 stderr 打的，吞了 stderr 就什么都看不到
 ic() { chroot "$ROOT" /usr/bin/env -i $CHENV /bin/bash -c "$1" 2>&1; }
+# 跑刚才落盘的 ltd/pro 探针（单独一个函数，免得嵌在字符串里被引号吃掉）
+in_chroot_audit() { ic '/www/server/panel/pyenv/bin/python3 /tmp/audit_ltd.py' | tail -1; }
 
 hr() { echo "===== $1 ====="; }
 
@@ -98,6 +100,9 @@ proc_of() {
         tomcat)    proc_pid 'catalina.base=/www/server/tomcat' ;;
         mysqld)    ic 'pgrep -x mariadbd | head -1' ;;
         php-fpm-82) ic 'pgrep -x php-fpm | head -1' ;;
+        # redis 的进程名是 redis-server，不是 redis（实测踩到：写成 pgrep -x redis
+        # 会一直显示「进程✗」，而 6379 明明在监听）
+        redis)     ic 'pgrep -x redis-server | head -1' ;;
         *)         ic "pgrep -x $1 | head -1" ;;
     esac
 }
@@ -136,12 +141,21 @@ printf '  %-14s %s\n' "端口"      "$(cat "$ROOT/www/server/panel/data/port.pl"
 printf '  %-14s %s\n' "安全入口"  "$(cat "$ROOT/www/server/panel/data/admin_path.pl" 2>/dev/null)"
 printf '  %-14s %s\n' "凭据文件"  "$([ -f "$ROOT/root/qiyuntai-panel-info.txt" ] && echo 有 || echo 没有)"
 printf '  %-14s %s\n' "补丁标记"  "$([ -f "$ROOT/www/server/panel/moli_patch/.patched" ] && echo 已打 || echo 未打/已回滚)"
-echo "  ltd/pro：$(ic 'cd /www/server/panel && ./pyenv/bin/python3 -c "
-import sys; sys.path.insert(0,\".\")
-from class import panelPlugin
-d=panelPlugin.panelPlugin().get_cloud_list()
-print(\"ltd=\", d.get(\"ltd\"), \" pro=\", d.get(\"pro\"))
-"' 2>&1 | tail -1)"
+# ltd/pro 要真去调一次云端列表（补丁有没有生效就看这两个数：0 / -1）。
+# 注意：这段 python 一次性写在临时文件里，别塞进 ic '... -c "…"' —— 引号会被吃掉，
+# 实测报 `SyntaxError: invalid syntax`（而那看起来很像补丁坏了）。
+cat > "$ROOT/tmp/audit_ltd.py" <<'EOS'
+import sys, os, json
+PANEL = '/www/server/panel'
+os.chdir(PANEL); sys.path.insert(0, PANEL); sys.path.insert(0, os.path.join(PANEL, 'class'))
+from flask import Flask
+app = Flask(__name__); app.secret_key = 'moli-audit'
+with app.test_request_context('/'):
+    import panelPlugin
+    d = panelPlugin.panelPlugin().get_cloud_list()
+    print('ltd=%s pro=%s' % (d.get('ltd'), d.get('pro')))
+EOS
+echo "  ltd/pro：$(in_chroot_audit)"
 
 hr "5) 面板插件（文档承诺 9 个）"
 n=0

@@ -214,15 +214,16 @@ sh install/deploy.sh --from-image /data/qyt_image
   不重新随机，所有用同一镜像的人就完全一样
 * 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**）
 
-**现成的镜像在哪**：Release（当前 `v1.2.5`）的附件里就有 `qyt-image.part-*` 分卷和
+**现成的镜像在哪**：Release（当前 `v1.2.6`）的附件里就有 `qyt-image.part-*` 分卷和
 `SHA256SUMS.txt`（分卷按 1900 MB 切开，GitHub 单附件上限 2 GiB）。
 全部下到**同一个目录**再喂给 `--from-image`（分卷名要按 `part-aaa / -aab / …` 顺序排好，
 `cat qyt-image.part-*` 是按名字拼的）：
 
 ```powershell
 # 1) 电脑上下载全部分卷 + 校验和
-& gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'qyt-image*' --dir .\qyt_image
-& gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'SHA256SUMS.txt' --dir .\qyt_image
+& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'qyt-image*' --dir .\qyt_image
+& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'SHA256SUMS.txt' --dir .\qyt_image
+& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'IMAGE-MANIFEST.txt' --dir .\qyt_image
 
 # 2) 推到手机（几 GB 走 USB，耐心等；同样推 /data/local/tmp，不用 /sdcard）
 adb shell "mkdir -p /data/local/tmp/qyt_image"
@@ -240,8 +241,8 @@ adb shell "su -c 'sh $D/install/deploy.sh --from-image /data/local/tmp/qyt_image
 ### 只想装 / 更新模块（环境已经好了）
 
 ```powershell
-adb push qiyuntai_btpanel-v1.2.5.zip /sdcard/
-adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.5.zip'"
+adb push qiyuntai_btpanel-v1.2.6.zip /data/local/tmp/
+adb shell "su -c '/data/adb/ksud module install /data/local/tmp/qiyuntai_btpanel-v1.2.6.zip'"
 ```
 
 * `ksud` 的真实路径是 **`/data/adb/ksud`**（不在 `PATH` 里）
@@ -370,8 +371,9 @@ tools/                   辅助脚本
 docs/                    说明与记录
   handover.md             交付说明（含版本复核记录）
   pitfalls.md             踩坑记录（全部为实测结论）
-  release-notes-v1.2.5.md 当前版本的 Release 说明
-  release-notes-v1.2.4.md 上一版（历史保留）
+  release-notes-v1.2.6.md 当前版本的 Release 说明
+  release-notes-v1.2.5.md 上一版（历史保留）
+  release-notes-v1.2.4.md 更早的一版（历史保留）
   release-notes-v1.2.3.md 更早的一版（历史保留）
   private-deployment.md   本机真实地址与口令（已 gitignore，不进仓库）
 

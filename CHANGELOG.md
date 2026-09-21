@@ -1,21 +1,12 @@
-# 更新日志
-
-> **关于 v1.2.3 之前**：当时这个目录还不是 git 仓库，发布靠逐文件调 GitHub Contents API，
-> 所以没有逐版本的记录。下面只写我在文件内容、文件时间戳和提交信息里**能核实**的东西，
-> 核实不了的一律不写 —— 与其编一份好看的假历史，不如承认这段没有记录。
-
----
-
 ## v1.2.5 — 2026-09-22
 
 `versionCode = 10205`
 
-这一版改的主体是**部署脚本**（`install/`）和随之重打的**预制镜像**：把「文档里承诺了、
-脚本从没做过」的东西一处一处补上（下面四条都是这一轮的实测收获）。`module/` 的**代码逻辑没改**，
-只动了 `module.prop` 的版本号 —— 切版本号是为了让「tag / Release 附件 / 预制镜像」
-三者指向同一个提交，不然镜像里的脚本是 main、tag 却停在 v1.2.4。
+这一版改的主体是**部署脚本**（`install/`）：把「文档里承诺了、脚本从没做过」的东西
+一处一处补上。`module/` 的**代码逻辑没改**，只动了 `module.prop` 的版本号 ——
+切版本号是为了让「tag / Release 附件」指向同一个提交。
 
-> 下面这些条目相对 v1.2.4 的增量。
+> 下面这些条目相对 v1.2.4 的增量。Release 说明见 `docs/release-notes-v1.2.5.md`。
 
 ### `crond` / `tomcat` / `memcached` 的 init 脚本从来没被装进 chroot
 
@@ -53,6 +44,45 @@
   「主组改 inet + `-u memcached`」成功、「`-u root`」成功、「只加附加组」失败。
   所以把 `memcached` 的**主组**改成 `inet`（三处：step_memcached / android-network-fix.sh /
   service.sh 开机兜底）。
+
+
+### 新增「基线包对齐」步骤（`parity`）
+
+* 手写脚本漏装是常态，读代码查不全，那就对数据：仓库里带一份
+  `install/baseline-packages.txt`（删除前那台的 `rpm -qa` 输出，548 行 / 20899 字节，
+  sha256 `4b3c870a…`，与设备上那份逐字节一致）。
+* `parity` 按**包名**比对（版本会被源往前推：实测 glibc/libxml2/util-linux 等 20 来个
+  名字相同版本不同），缺的先批量装、不行再逐个兜底，最后如实报告源里已经没有的那些名字。
+* 实测这步补齐了 java-*-openjdk / jq / htop / bind-utils / libpcap 等一批基线里有的包。
+
+
+### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
+
+* `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
+  文档也写着它，但**没有任何脚本装 `openssh-server`，也没有任何脚本写这个配置文件**。
+  实测：`step_deps` 的 dnf 清单里根本没有 openssh 相关的包。
+* 基线（删除前那台）确认是活的：`netstat` 有 `0.0.0.0:22  LISTEN  …/sshd_config_mo`，
+  `pkglist_pre.txt` 里有 `openssh-server-9.6p1-21.oe2403sp3`。也就是说它当年是手工装的。
+* 现在：`step_deps` 加 `openssh-server openssh-clients`，`step_patch` 把
+  `install/sshd_config_moli` 装到 `/etc/ssh/`，并在缺主机密钥时跑一次 `ssh-keygen -A`。
+  配置文件内容是从删除前的备份 tarball 里原样取出来的 —— 365 字节，
+  sha256 `951da0fbe8f7e6101582d61fd2778a4094fd4c536e6adf4e81fa992bd2e064d7`，与备份逐字节一致。
+* 顺带：`--from-image` 的时候会**重新生成主机密钥**（`rm -f /etc/ssh/ssh_host_*` + `ssh-keygen -A`），
+  否则同一个镜像刷多台设备会共用同一份主机密钥。
+
+---
+
+## v1.2.6 — 2026-09-22
+
+`versionCode = 10206`
+
+这一版是 **v1.2.5 之后继续深挖出来的东西**：同一套「拿基线数据反向对账」的办法，
+又查出 4 个「文档有、实现没有」的缺口（Tomcat 软件本体、memcached 的组身份、
+redis 插件、以及一批环境细节），另外修了部署链路自己的 5 个 bug（SSL 自动开启、
+补丁打半截、`/sdcard` 是 CE 存储、`warn` 未定义、两行被粘成一行）。
+
+**预制镜像也随这一版第一次正式发布**（`qyt-image.part-*` 两卷，2.07 GB），
+镜像是这次从零重装、逐项对账之后打出来的，见 `docs/handover.md` §十。
 
 ### Tomcat 也是「没有任何来源」：插件只装插件文件
 
@@ -135,20 +165,6 @@
 原来清单写在 `$ROOT/IMAGE-MANIFEST.txt`，而 `$ROOT` 就是下一行要 `tar` 的整棵树 ——
 结果清单既被冻进镜像、又不在输出目录里所以上传命令带不上它，
 而 README 与 Release 说明里都是把它当附件列的。
-
-### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
-
-* `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
-  文档也写着它，但**没有任何脚本装 `openssh-server`，也没有任何脚本写这个配置文件**。
-  实测：`step_deps` 的 dnf 清单里根本没有 openssh 相关的包。
-* 基线（删除前那台）确认是活的：`netstat` 有 `0.0.0.0:22  LISTEN  …/sshd_config_mo`，
-  `pkglist_pre.txt` 里有 `openssh-server-9.6p1-21.oe2403sp3`。也就是说它当年是手工装的。
-* 现在：`step_deps` 加 `openssh-server openssh-clients`，`step_patch` 把
-  `install/sshd_config_moli` 装到 `/etc/ssh/`，并在缺主机密钥时跑一次 `ssh-keygen -A`。
-  配置文件内容是从删除前的备份 tarball 里原样取出来的 —— 365 字节，
-  sha256 `951da0fbe8f7e6101582d61fd2778a4094fd4c536e6adf4e81fa992bd2e064d7`，与备份逐字节一致。
-* 顺带：`--from-image` 的时候会**重新生成主机密钥**（`rm -f /etc/ssh/ssh_host_*` + `ssh-keygen -A`），
-  否则同一个镜像刷多台设备会共用同一份主机密钥。
 
 ---
 

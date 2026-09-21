@@ -352,6 +352,43 @@ step_plugins() {
 
     step_memcached
     step_tomcat
+    step_node
+}
+
+# nodejs：让面板的 Node 版本管理器里真的有一个 node 版本
+#
+# 【为什么需要】nodejs 插件只装插件文件，**版本要在插件界面里点装**。
+#   基线那台有 /www/server/nodejs/v20.18.3（160.8 MB）+ npm 10.8.2，
+#   而新装的环境只有 vhost/ 一个空目录 —— 文档里写着「宝塔管理器内置 node v20.18.3」
+#   就变成空话（系统那个 /usr/bin/node v20.18.2 是 rpm 装的，是另一回事）。
+# 【怎么装】直接调插件自己的 API：plugin/nodejs/nodejs_main.py 的 install_nodejs，
+#   它会从宝塔的 node 源下载并解到 /www/server/nodejs/<版本>（实测 v20.18.3 成功）。
+#   这一项失败不致命（系统 node 还在），所以只告警不 fail。
+NODE_VER=v20.18.3
+step_node() {
+    if [ -x "$ROOT/www/server/nodejs/$NODE_VER/bin/node" ]; then
+        log "面板 Node 管理器里已有 $NODE_VER，跳过"
+        return 0
+    fi
+    log "给面板的 Node 版本管理器装 node $NODE_VER（插件只装插件文件，版本要另外装）"
+    cat > "$ROOT/tmp/node_install.py" <<EOS
+import sys, os, json
+PANEL='/www/server/panel'
+os.chdir(PANEL); sys.path.insert(0, PANEL); sys.path.insert(0, os.path.join(PANEL,'class'))
+from flask import Flask
+app=Flask(__name__); app.secret_key='moli'
+with app.test_request_context('/'):
+    import public
+    sys.path.insert(0, os.path.join(PANEL,'plugin','nodejs'))
+    import nodejs_main
+    n = nodejs_main.nodejs_main()
+    print(json.dumps(n.install_nodejs(public.to_dict_obj({'version': '$NODE_VER'})), ensure_ascii=False)[:200])
+EOS
+    if in_chroot "/www/server/panel/pyenv/bin/python3 /tmp/node_install.py" | tr -d '\r' | grep -q '"status": true'; then
+        log "  node $NODE_VER 就绪：$(in_chroot "PATH=/www/server/nodejs/$NODE_VER/bin:\$PATH node -v" | tr -d '\r' | tail -1)"
+    else
+        warn "  node $NODE_VER 没装上（面板里可以手动装；系统 /usr/bin/node 不受影响）"
+    fi
 }
 
 # tomcat：铺软件本体到 /www/server/tomcat
