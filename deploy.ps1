@@ -8,9 +8,16 @@
 #
 # 它做四件事：
 #   1) 找 adb、等设备、确认手机上能拿到 root
-#   2) 把 install/ 和 module/ 推到手机（同一层目录）
+#   2) 把 install/ module/ tools/ 推到手机（必须在同一层目录）
+#      tools/ 是必须的：step_plugins 要用 tools/plugin_install.py、
+#      step_patch 要用 tools/moli_patch.py
 #   3) 在手机上跑 install/deploy.sh —— 剩下的全自动：
-#        铺 rootfs → 装面板/组件/插件/补丁 → 装 KernelSU 模块 → 重启
+#        铺 rootfs → 装面板 → 装组件（源码编译 OpenResty/MariaDB/PHP/phpMyAdmin）
+#        → 装 9 个面板插件 → 打补丁 → 装 KernelSU 模块 → 重启
+#      耗时约 2 小时（MariaDB 编译峰值约 2 GB 内存）。
+#      装第二台可以先打预制镜像再用 deploy.sh --from-image，约 10 分钟：
+#        sh tools/make_image.sh --out /data/qyt_image
+#        sh install/deploy.sh --from-image /sdcard/qyt_image
 #   4) 收尾提示
 #
 # 参数：

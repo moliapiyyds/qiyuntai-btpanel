@@ -116,7 +116,8 @@ adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/action.sh diag'"
 * **arm64 (aarch64)** 设备
 * KernelSU / KernelSU-Next / Magisk（支持模块脚本的）
 * 内核支持 `mount --bind` / `chroot` / `proc` / `sysfs` / `devpts` / `tmpfs`（Android 4.4+ 基本都满足）
-* `/data` 留够 **10 GB**（rootfs + 面板与组件装完约 4-6 GB）
+* `/data` 留够 **20 GB**（实测：rootfs + 面板与组件装完 **17.7 GB**；
+  其中 MariaDB 编译构建树 `www/server/mysql/src` 占 8.8 GB，运行时可删）
 
 ## 适用性
 

@@ -32,8 +32,9 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 → 装面板/组件/插件/打补丁 → 装 KernelSU 模块 → **自动重启**。
 重启后点模块的「执行」按钮，地址和账号密码会直接打印出来。
 
-> 耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**）。
+> 耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）。
 > 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb`）、分步部署、纯手机侧自举 → 见「三、部署」。
+> **装第二台**可以用预制镜像，约 10 分钟且不依赖宝塔服务器 → 见「三、部署 → 预制镜像」。
 
 ---
 
@@ -138,9 +139,10 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 ### 分步部署（想自己控制的用这个）
 
 ```sh
-# 1) 推文件（install/ 和 module/ 必须在同一层目录）
+# 1) 推文件（install/ module/ tools/ 必须在同一层目录）
 adb push install/ /sdcard/install/
 adb push module/  /sdcard/module/
+adb push tools/   /sdcard/tools/     # step_plugins 要 plugin_install.py、step_patch 要 moli_patch.py
 
 # 2) 体检，不装任何东西
 adb shell "su -c 'sh /sdcard/install/deploy.sh --check'"
@@ -158,11 +160,42 @@ adb shell "su -c 'sh /sdcard/install/deploy.sh'"
 | `--repo-tar <文件>` | 仓库用本地已推过来的 tar.gz，不连 GitHub |
 | `--url <tar.xz>` | rootfs 走指定 URL |
 | `--tar <文件>` | rootfs 用本地已解压好的 docker tar |
+| `--from-image <目录>` | **用预制镜像铺环境**（目录里放 `qyt-image.part-*`）：跳过 dnf 和全部源码编译，约 10 分钟 |
+| `--image-sha <sha>` | 额外指定镜像整包 sha256（不给就用目录里的 `SHA256SUMS.txt`） |
 | `--no-reboot` | 装完不重启 |
+
+`install/prepare-rootfs.sh` 也有几个独立开关：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--mirror` | 自动到镜像目录挑 rootfs 文件并下载（一键部署走这条） |
+| `--unmount` | 只解挂载（**删除 chroot 前必须先做这个**） |
+| `--clean` | 解挂载 → 确认干净 → 删除。**安全的删法**，别直接 `rm -rf` |
 
 > 手机上只有 `busybox` 可用（没有 curl / wget / xz），所以：
 > **rootfs 能从清华镜像下**（HTTP/HTTPS 都行），**仓库不能从 GitHub 下**。
 > 想完全在手机上自举，先把仓库打包推上去再用 `--repo-tar`。
+
+### 预制镜像（装第二台、或宝塔哪天没这个版本了）
+
+从零装要碰一堆宝塔的端点（安装器 / panel6.zip / pyenv bundle / 组件脚本 / 组件源码），
+任何一环变了或没了，从零装就断。所以：**装好一次，冻成镜像，以后重装 = 解包。**
+
+```sh
+# 打镜像（设备上跑，环境已装好；会自动拒绝在"还有挂载"或"打了补丁"的状态下打包）
+sh tools/make_image.sh --out /data/qyt_image
+# 产出：qyt-image.part-aaa / -aab / …（按 1900MB 分卷，GitHub 单附件上限 2GiB）+ SHA256SUMS.txt
+
+# 用镜像装（设备上跑；目录里放分卷）
+sh install/deploy.sh --from-image /sdcard/qyt_image
+```
+
+* 跳过 **dnf + 全部源码编译**，从 ~2 小时降到 **~10 分钟**，且不连宝塔的服务器
+* 镜像里存的是**未打补丁的原版**，破解补丁在部署时打（补丁要跟面板版本走，冻进去就没法单独更新；
+  而且只有对原版打，`moli_patch/backup_*/` 里才是真原版，回滚点才成立）
+* **端口 / 安全入口 / 用户名 / 密码会在部署时重新随机** —— 镜像里烘的是打包那台机器的值，
+  不重新随机，所有用同一镜像的人就完全一样
+* 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**）
 
 ### 只想装 / 更新模块（环境已经好了）
 
@@ -264,14 +297,18 @@ install/                 设备上执行的部署脚本
   android-network-fix.sh  paranoid-network 的 inet 组修正
   crond.initd             chroot 缺这两个 init 脚本，crond/tomcat 起不来
   tomcat.initd
-  lib-shim.sh
+  lib-shim.sh            替换面板原版 lib.sh 的最小依赖兜底（避免重复编译 openssl/mcrypt）
+  bt-panel-install.exp   驱动宝塔官方安装器：分配 pty、按「提示内容」作答（不依赖提问顺序）
+  installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单
 
 tools/                   辅助脚本
   moli_patch.py           面板改造补丁（永久企业版 / 关闭更新 / 免绑定），幂等
   plugin_install.py       宝塔插件安装器（走官方下载接口，无需登录面板）
   store_check.py          核对商店「已安装」状态
   build_module_zip.sh     打可刷模块 zip（带版本自检）
-  verify_sync.sh          本地 vs 远端逐文件比对
+  verify_sync.sh          本地 vs 远端比对 + Release 附件新鲜度（比内容，不比 zip 字节）
+  make_image.sh           把装好的环境冻成可分卷镜像（预制宝塔，见「三、部署」）
+  ci.sh                   仓库自检：shellcheck / sh -n / py_compile / CRLF / BOM / 哈希格式
 
 docs/                    说明与记录
   handover.md             交付说明（含版本复核记录）
@@ -280,6 +317,8 @@ docs/                    说明与记录
   private-deployment.md   本机真实地址与口令（已 gitignore，不进仓库）
 
 CHANGELOG.md              更新日志
+.github/workflows/ci.yml  GitHub Actions：调 tools/ci.sh（本地同一个脚本）
+.shellcheckrc             关掉 mksh 扩展误报（SC3043：Android 的 /system/bin/sh 支持 local）
 ```
 
 ---

@@ -155,6 +155,48 @@ else
     bad "找不到 install/installer.lock"
 fi
 
+# ---------- 8) README 的「仓库结构」是否覆盖全部被跟踪文件 ----------
+head_ "8) README 仓库结构 vs 实际文件"
+if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
+    skip "不在 git 仓库里，跳过（这一项依赖 git ls-files）"
+elif ! command -v python3 >/dev/null 2>&1; then
+    if [ "${CI:-}" = "true" ]; then bad "CI 里没有 python3"; else skip "没有 python3"; fi
+else
+    python3 - <<'PY'
+import re, subprocess, sys
+
+readme = open('README.md', encoding='utf-8').read()
+# 抓「## 六、仓库结构」到下一个 ## 之间的内容
+m = re.search(r'^##\s*六、仓库结构\s*$', readme, re.M)
+if not m:
+    print("  [失败] README 里找不到「## 六、仓库结构」这一节")
+    sys.exit(1)
+tail = readme[m.end():]
+m2 = re.search(r'^##\s', tail, re.M)
+block = tail[:m2.start()] if m2 else tail
+
+tracked = subprocess.run(['git', 'ls-files'], capture_output=True, text=True).stdout.split()
+skip_names = {'.gitignore', 'LICENSE', 'README.md', 'CHANGELOG.md'}
+
+missing = []
+for f in tracked:
+    if f in skip_names:
+        continue
+    base = f.rsplit('/', 1)[-1]
+    if base in block or f in block:
+        continue
+    missing.append(f)
+
+if missing:
+    print("  [失败] 这些文件的文件名没出现在 README 的仓库结构节里：")
+    for f in sorted(missing):
+        print("         %s" % f)
+    sys.exit(1)
+print("  [OK]   仓库结构节覆盖了全部 %d 个被跟踪文件" % (len(tracked) - len([x for x in tracked if x in skip_names])))
+PY
+    [ "$?" = "0" ] || FAIL=$((FAIL + 1))
+fi
+
 # ---------- 汇总 ----------
 printf '\n============================================================\n'
 if [ "$FAIL" = 0 ]; then
