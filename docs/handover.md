@@ -33,15 +33,18 @@
 
 | 组件 | 版本 | 实测证据 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0 (aarch64) | 登录页 200，进程 BT-Panel |
+| 宝塔面板 | 9.5.0 (aarch64)　**（版本号未复核，见文末说明）** | 登录页 200，进程 BT-Panel |
 | Web | **OpenResty 1.31.1.1** | `nginx -v` → openresty/1.31.1.1，`nginx -t` ok，监听 80/888 |
 | 数据库 | **MariaDB 10.11.16** | `select version()` → 10.11.16-MariaDB-log，监听 3306 |
 | PHP | **8.2.33** | `php -v` → 8.2.33，php-fpm 运行，`/tmp/php-cgi-82.sock` |
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin/version.pl` = 5.2 |
-| Fail2ban | **2.6**（内含 fail2ban 1.1.0） | 封禁 203.0.113.9 → `f2b-sshd` 规则出现 → 解封消失 |
+| Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 封禁 203.0.113.9 → `f2b-sshd` 规则出现 → 解封消失 |
 | Redis | **7.2.16**（宝塔托管） | `PONG`，监听 127.0.0.1:6379 |
-| Node.js 管理器 | 2.8（宝塔插件） | 商店显示已安装/运行中 |
-| 额外环境 | Python 3.13 + pip/venv、OpenJDK 17/11/8、Node 20.18 + npm 10.8、git、vim、htop、tmux、jq、sqlite3、gcc/make/cmake 编译链、rsync、tcpdump、lsof 等 | 逐个 `--version` 核对通过 |
+| Node.js 管理器 | 2.8（宝塔插件） | 插件 `info.json` 的 `versions` = 2.8，商店显示已安装/运行中 |
+| Tomcat | **9.0** | `catalina.jar` MANIFEST 的 `Specification-Version: 9.0`，插件名 `tomcat2` |
+| Supervisor | **4.2.4** | `supervisord --version` |
+| Memcached | **1.6.45** | `memcached --version` |
+| 额外环境 | Python **3.13.14** + pip 26.2、OpenJDK **1.8.0_502 / 11.0.32.9 / 17.0.20.8**、Node **v20.18.2** + npm **10.8.2**、git 2.43.0、vim 9.0、htop 3.3.0、tmux 3.3a、jq 1.8.2、sqlite3 3.42.0、gcc 12.3.1 / make 4.4.1 / cmake 3.27.9、rsync 3.2.7、tcpdump(libpcap 1.10.4)、lsof 4.99.3 | 逐个 `--version` 核对通过（2026-09-21 复核） |
 
 商店「已安装」核对（脚本 `store_check.py`）：nginx / mysql / phpmyadmin / fail2ban / nodejs / redis 全部 **是**。
 phpMyAdmin 那条显示「已停止」是宝塔语义（未对公网开放），不是没装。
@@ -195,3 +198,83 @@ git push -u origin main
 * 手机总内存 5.83 GB，MariaDB 编译峰值吃掉约 2 GB（编制期间我执行过 `am kill-all` 释放后台内存）；后续装大件前建议先清内存。
 * 面板商店里 phpMyAdmin 显示「已停止」= 未开放公网访问，属正常；需要的话在面板里点"开放"。
 * dnf 装的 Redis（7.2.15）已被宝塔版（7.2.16）接管，包还在，没跑；如需干净可 `dnf remove redis`（未做，怕影响其他依赖）。
+
+---
+
+## 八、版本复核记录（2026-09-21）
+
+> 目的：把文档里写的组件版本跟**设备上的真实运行环境**逐条对一遍。
+> 复核方式：在 chroot 里逐个跑版本命令，不用文档里的旧值。
+
+### 复核命令
+
+```sh
+ROOT=/data/openeuler
+CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
+ic() { chroot "$ROOT" /usr/bin/env -i $CHENV /bin/bash -c "$1"; }
+
+ic '/www/server/nginx/sbin/nginx -v'                    # OpenResty
+ic '/www/server/mysql/bin/mariadbd --version'           # MariaDB
+ic '/www/server/php/82/bin/php -v'                      # PHP
+ic 'cat /www/server/phpmyadmin/version.pl'              # phpMyAdmin
+ic 'fail2ban-client --version'                          # Fail2ban（上游版本）
+ic 'cat /www/server/panel/plugin/fail2ban/info.json'    # Fail2ban（插件版本）
+ic '/www/server/redis/src/redis-server -v'              # Redis
+ic 'cat /www/server/panel/plugin/nodejs/info.json'      # Node.js 管理器插件版本
+ic 'unzip -p /www/server/tomcat/lib/catalina.jar META-INF/MANIFEST.MF | grep Specification-Version'  # Tomcat
+ic 'supervisord --version'                              # Supervisor
+ic 'memcached --version'                                # Memcached
+ic 'python3 --version; java -version; javac -version; node -v; npm -v'
+```
+
+### 结果
+
+| 组件 | 文档原值 | 实测 | 处理 |
+| --- | --- | --- | --- |
+| OpenResty | 1.31.1.1 | `openresty/1.31.1.1` | 一致 |
+| MariaDB | 10.11.16 | `10.11.16-MariaDB-log for Linux on aarch64` | 一致 |
+| PHP | 8.2.33 | `PHP 8.2.33 (NTS)` | 一致 |
+| phpMyAdmin | 5.2 | `/www/server/phpmyadmin/version.pl` = `5.2` | 一致 |
+| Redis | 7.2.16 | `Redis server v=7.2.16` | 一致 |
+| Node.js 管理器 | 2.8 | 插件 `info.json` 的 `versions` = `2.8` | 一致 |
+| Fail2ban 插件 | 2.6 | 插件 `info.json` 的 `versions` = `2.6` | 一致 |
+| **Fail2ban 上游** | **1.1.0** | **`Fail2Ban v1.1.1.dev1`** | **已改正** |
+| **Node.js 内置** | **v20.18.3** | **`v20.18.2`** | **已改正** |
+| **JDK（java环境管理器）** | **17.0.8** | **`javac 17.0.20`**，目录 `java-17-openjdk-17.0.20.8` | **已改正** |
+| Python | 3.13 | `Python 3.13.14`，pip 26.2 | 已补精确值 |
+| Java（系统 dnf） | 17 / 11 / 8 | 目录里确实三个都在：`1.8.0_502` / `11.0.32.9` / `17.0.20.8`。**默认 `java` 指向 8**（BiSheng build），**默认 `javac` 指向 17** | 已补说明 |
+| **Tomcat** | **文档未列** | **`Specification-Version: 9.0`**（插件名 `tomcat2`） | **已补** |
+| **Supervisor** | **文档未列** | **`4.2.4`** | **已补** |
+| **Memcached** | **文档未列** | **`1.6.45`** | **已补** |
+| git / vim / htop / tmux / jq / sqlite3 | 只写了名字 | 2.43.0 / 9.0 / 3.3.0 / 3.3a / 1.8.2 / 3.42.0 | 已补版本 |
+| gcc / make / cmake | 「完整编译链」 | 12.3.1 (openEuler) / 4.4.1 / 3.27.9 | 已补版本 |
+| rsync / tcpdump / lsof | 只写了名字 | 3.2.7 / libpcap 1.10.4 / 4.99.3 | 已补版本 |
+
+### ❗ 唯一没能复核的一条：宝塔面板版本 9.5.0
+
+文档写 `宝塔面板 9.5.0 (aarch64)`。这次**试了 8 条途径都没能从运行环境证实**：
+
+| 途径 | 结果 |
+| --- | --- |
+| `/www/server/panel/version.pl`、`data/version.pl`、`class/version.pl`、`config/version.pl` | 都不存在 |
+| `common.py` 里的 `get_version()` | 该函数不存在（`grep 'def get_version'` 无匹配） |
+| `bt 14` | 只打印了 `BT-Panel default info!` 表头，没给版本 |
+| `panel.db` 的 `config` 表 | 只有 `webserver/backup_path/sites_path` 等列，没有版本列 |
+| 登录页 HTML（951 字节全量） | 不含版本号 |
+| `BTPanel/static` 里搜版本 | 无匹配 |
+| 全库搜字符串 `9.5.0` | 只命中 `class/projectModel/wordpress.db` 和 `data/firewall/GeoLite2-Country.json`，都是巧合 |
+| `public.get_version()` | `ModuleNotFoundError: No module named 'public'`（缺 sys.path 上下文） |
+
+**所以两处文档里这条已改成带标注的写法**，而不是保留一个查不到出处的数字：
+
+> `| 宝塔面板 | 9.5.0 (aarch64)　**（版本号未复核，见文末说明）** |`
+
+**自己确认的办法**：登录面板 → 首页右下角会显示当前版本；
+或在面板「设置 → 面板信息」里看；或 chroot 后跑 `bt` 进菜单看。
+
+### 结论
+
+* 组件的**大版本号**（OpenResty / MariaDB / PHP / phpMyAdmin / Redis / Node 管理器 / Fail2ban 插件）**全部对得上**。
+* 三处**小版本号写错了**（Fail2ban 上游 1.1.0→1.1.1.dev1、Node v20.18.3→v20.18.2、JDK 17.0.8→17.0.20.8），已改正。
+* 三个组件**文档漏写了**（Tomcat 9.0 / Supervisor 4.2.4 / Memcached 1.6.45），已补。
+* 面板版本号 `9.5.0` **无法从运行环境证实**，已如实标注，没有硬留一个查不到出处的数字。

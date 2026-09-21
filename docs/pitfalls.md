@@ -37,7 +37,8 @@ softInfo['setup'] = os.path.exists(softInfo['install_checks'])
 
 ### 4. 「Fail2ban 2.6」是插件版本，不是上游版本
 云端列表里该条目的 `versions[0]` 是 `m_version=2` + `version=6` → 显示 2.6，
-插件包里自带上游 fail2ban 1.1.0。上游 fail2ban 本身没有 2.6 这个版本号。
+插件包里自带上游 fail2ban（本机实测 `fail2ban-client --version` → **v1.1.1.dev1**）。
+上游 fail2ban 本身没有 2.6 这个版本号。
 
 ### 5. 插件包可以免登录下载
 `class/panelPlugin.py: __download_plugin()` 走的是

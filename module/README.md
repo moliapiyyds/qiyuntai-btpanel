@@ -140,16 +140,19 @@ bt 6      # 修改面板入口
 
 | 组件 | 版本 | 说明 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0（aarch64 版） | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
+| 宝塔面板 | 9.5.0（aarch64 版）　*版本号未复核，见 `docs/handover.md` 文末* | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
 | Web 服务器 | **OpenResty 1.31.1.1**（宝塔 nginx 卡片的 openresty 版本） | 源码编译，`/www/server/nginx` |
 | 数据库 | **MariaDB 10.11 LTS** | 宝塔「MySQL」卡片里的 `mariadb_10.11` |
 | PHP | **8.2** | `/www/server/php/82`，php-fpm |
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin` |
-| Fail2ban | **2.6**（插件版，内含 fail2ban 1.1.0） | 已实测可封禁/解封 IP |
-| Redis | 7.2 | dnf 安装，开机自动拉起 |
-| Python | 3.13（面板 pyenv）+ 系统 python3 + pip/venv | |
-| Java | OpenJDK 17 / 11 / 8 | |
-| Node.js | 20.18 + npm 10.8 | |
+| Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 已实测可封禁/解封 IP |
+| Redis | **7.2.16** | dnf 安装，开机自动拉起 |
+| Tomcat | **9.0** | 插件 `tomcat2` |
+| Supervisor | **4.2.4** | 进程守护管理器 |
+| Memcached | **1.6.45** | 开机自动拉起 |
+| Python | **3.13.14**（面板 pyenv）+ 系统 python3 + pip/venv | |
+| Java | OpenJDK **17.0.20.8 / 11.0.32.9 / 1.8.0_502**（默认 `java` 是 8，默认 `javac` 是 17） | |
+| Node.js | **v20.18.2** + npm **10.8.2** | |
 | 其他 | git、vim、htop、tmux、jq、sqlite3、rsync、lsof、net-tools、tcpdump、gcc/make/cmake 编译链 | |
 
 以上组件都是**用宝塔官方脚本/官方插件安装的**，所以在面板「软件商店 → 已安装」里能正常显示、能启停。
