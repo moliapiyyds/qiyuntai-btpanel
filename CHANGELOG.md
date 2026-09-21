@@ -118,6 +118,63 @@ shellcheck 报的 SC2115：`rm -rf "$ROOT/$p"` 在 `$p` 为空时会展开成 `r
 分卷机制「改一字节 / 少一卷 / 逆序拼接」三种损坏都被 sha256 抓到，解压后逐字节一致。
 分卷后缀是**字母序**（`part-aaa`、`part-aab`…），`cat` 时按字母序即原顺序。
 
+### 其它实测修复与加固（安装路径 / 安全 / 工具链）
+
+一键部署原来**跑不完**，这一串是逐个真跑出来的：
+
+* **`step_rootfs` / `deploy.sh` 都没把「源」交给 `prepare-rootfs.sh`** ——
+  它要求 `--url/--xz/--tar` 之一，只传 `--root` 会被它以「没给源」退出，
+  一键部署必然卡在 rootfs 这一步。改法：给 `prepare-rootfs.sh` 加 `--mirror`
+  （用它自己探好的下载器去镜像目录挑文件），两个调用点都传 `--mirror`。
+  *教训：改调用点之前先 `grep` 出所有调用点 —— 第一次只改了一个，
+    而一键部署走的是另一个，所以修完再跑还是同样的错。*
+* **清华镜像对「文件下载」挑 User-Agent**（目录列表反而不挑）。实测用魔数判定：
+  默认 UA 与 `Mozilla/5.0` 都是 **403 / 0 字节**，`Wget/1.21` 才通；
+  官方 `repo.openeuler.org` 与华为云不挑。而 `fetch` 的 busybox 分支**不传 UA**、
+  wget/curl 分支传 `Mozilla/5.0` —— 三种下载器全被 403。
+  改法：主源换官方、清华降备用、busybox 分支带 UA、
+  下载改成「多源依次试」并按大小验证（>1MB 才算成功 ——
+  被拒时服务器可能返回小错误页而 `rc=0`，只看返回码会误判）。
+* **`prepare-rootfs.sh` 的「验证 chroot」误报**：原来是
+  `chroot $ROOT /bin/bash -c 'head -1 /etc/os-release'`，没设 PATH；
+  宿主 PATH 是 `/system/bin:...`，在 chroot 里不存在 → `head: command not found`
+  → 输出为空 → 报「chroot 进不去」。改成只用 bash 内建命令，失败时打真实报错。
+* **`expect` 驱动自身的两个 bug**（都是真跑面板安装时才暴露）：
+  ① 「未识别提问」用了 `-re {[^\r\n]{1,80}[：:]\s*$}` —— expect 的 `$` 匹配的是
+  **缓冲区末尾**而不是行尾，而 `read -p` 的提示本来就不带换行，于是「一个完整提示」
+  和「半个正在到达的行」在缓冲区里长得一样。实测撞上安装器第一行输出
+  `cat: /etc/hostname: No such file or directory` 被分块投递、缓冲区停在 `cat: `，
+  被当成提示直接失败。改成**两级判定**：静默 45 秒 **且** 尾部停在冒号上才算卡住。
+  ② 超时分支读 `$expect_out(buffer)` 会 Tcl 报错 —— expect 只在**匹配成功**后才设置
+  `expect_out`，超时时它不存在。改成从 `log_file` 记的日志尾部取。
+* **破解补丁三道守卫**（补丁原来是纯模式匹配，没有任何版本判断）：
+  ① `PANEL_VERIFIED` 版本白名单，不在名单里直接失败并要求人工核验后 `--force`；
+  ② `moli_patch/.patched` 标记，已打过且校验全过就跳过重打（否则会把「已打补丁的文件」
+  备份成「原版」，回滚点就假了）；
+  ③ `do_verify()` 返回未生效项数，非 0 时退出码非 0 且不写标记 ——
+  把原来「找不到补丁点只打一行 [跳过] 然后照样退出 0」的静默半成品变成明确失败。
+* **`/dev` 事故（第二次）后加的两道安全开关**：`module/uninstall.sh` 原来在提示里
+  直接教 `rm -rf /data/openeuler` —— 而 `$ROOT/dev` 是 `mount --bind /dev`，
+  是宿主真实 `/dev` 的绑定挂载，挂着它 `rm -rf` 会删掉设备节点 → 黑屏
+  （实测踩过两次）。现在 `uninstall.sh --purge` 会**先证明 `$ROOT/` 下挂载数为 0 再删**；
+  `prepare-rootfs.sh --clean` 同理。默认提示也改成安全的做法。
+* **`tools/verify_sync.sh` 加 Release 附件新鲜度检查**：原来只比「工作区 vs git 树」，
+  测不出「`module/` 改了但忘了重打 zip / 覆盖附件」（实测漏过一次）。
+  第一版比 zip 字节，结果**会误报** —— zip 的条目顺序随文件系统 readdir 变，
+  同一份 module/ 在仓库里和复制到 `/tmp` 后打出的 sha256 不同。
+  改成下载附件后用 python `zipfile` 与本地 `module/` **逐文件比内容**。
+* **`tools/make_image.sh` 的组件路径**：`/www/server/nginx/sbin` 是
+  `sbin -> /www/server/nginx/nginx/sbin` 的**绝对软链**，chroot 内能通、宿主侧不通
+  （`docs/pitfalls.md` §二.3 早写了这个坑）。脚本是宿主侧跑的，直接判断会误报
+  「组件没编译完」。改成「候选真实路径 → find 兜底」，并把解析结果写进镜像清单。
+* **README 结构节漏文件**：新增 6 个文件后没同步。已补全，并给 `tools/ci.sh`
+  加了第 8 项检查 —— 仓库结构节必须覆盖全部被跟踪文件，防止再漂移。
+* **`module/README.md` 与实际代码不一致**：§二只列了 7 项服务（实际 11 项）、
+  漏了 KernelSU 管理器注册与陈旧 pid 清理；§三没列那 9 个面板插件；
+  §五的 init.d 列表只列 5 个。已全部对齐。
+* **`deploy.ps1` 的自引用提示**：从别的目录调用时（例如免 clone 一行命令解包到 `%TEMP%`），
+  收尾提示原来一律印 `.\deploy.ps1`，照抄会失败。现在按工作目录判断。
+
 ### 文档口径统一（2026-09-21 复核）
 
 * `ltd`/`pro`：三处文档写 **-2**，实际代码是 **`ltd=0` / `pro=-1`**（`tools/moli_patch.py`）。

@@ -197,6 +197,43 @@ PY
     [ "$?" = "0" ] || FAIL=$((FAIL + 1))
 fi
 
+# ---------- 9) 字符层面检查（全部被跟踪文件） ----------
+head_ "9) 字符层面检查（UTF-8 / NUL / CR）"
+if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
+    skip "不在 git 仓库里，跳过"
+elif ! command -v python3 >/dev/null 2>&1; then
+    if [ "${CI:-}" = "true" ]; then bad "CI 里没有 python3"; else skip "没有 python3"; fi
+else
+    python3 - <<'PY'
+import subprocess, sys
+tracked = subprocess.run(['git', 'ls-files'], capture_output=True, text=True).stdout.split()
+bad = []
+for f in tracked:
+    try:
+        b = open(f, 'rb').read()
+    except OSError as e:
+        bad.append((f, '读不了: %s' % e)); continue
+    if b'\x00' in b:
+        bad.append((f, '含 NUL 字节（被当成二进制了？）')); continue
+    try:
+        t = b.decode('utf-8')
+    except UnicodeDecodeError as e:
+        bad.append((f, '不是合法 UTF-8：%s' % e)); continue
+    if '\r' in t:
+        bad.append((f, '含 CR（应为纯 LF）'))
+        continue
+    if not t.endswith('\n'):
+        bad.append((f, '最后一行没有换行符'))
+if bad:
+    print("  [失败] 有 %d 个文件不合规：" % len(bad))
+    for f, why in bad:
+        print("         %-40s %s" % (f, why))
+    sys.exit(1)
+print("  [OK]   %d 个被跟踪文件：合法 UTF-8、无 NUL、纯 LF、末尾有换行" % len(tracked))
+PY
+    [ "$?" = "0" ] || FAIL=$((FAIL + 1))
+fi
+
 # ---------- 汇总 ----------
 printf '\n============================================================\n'
 if [ "$FAIL" = 0 ]; then
