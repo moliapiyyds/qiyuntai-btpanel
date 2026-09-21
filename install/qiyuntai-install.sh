@@ -253,12 +253,19 @@ print(r[0][0] if r else \"\")"' 2>/dev/null | tr -d '\r' | tail -1)
     PATHV=$(cat "$ROOT/www/server/panel/data/admin_path.pl" 2>/dev/null)
     IP=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
     mkdir -p "$ROOT/root"
+    # 面板是不是开了 SSL：装完之后 bt 那个「自动申请 IP 证书」任务会写 data/ssl.pl=True
+    # （本仓库的 patch 步骤会关掉它，但用户自己也可能在面板里开）。协议写错了链接就连不上。
+    SCHEME=http
+    [ -f "$ROOT/www/server/panel/data/ssl.pl" ] && SCHEME=https
     {
         echo "栖云台 · 宝塔面板 访问信息（作者：茉莉 QQ:1265274322 群:570387739）"
         echo ""
         echo "【地址】"
-        echo "  手机/设备内： http://127.0.0.1:${PORT}${PATHV}"
-        echo "  局域网电脑 ： http://${IP}:${PORT}${PATHV}"
+        echo "  手机/设备内： ${SCHEME}://127.0.0.1:${PORT}${PATHV}"
+        echo "  局域网电脑 ： ${SCHEME}://${IP}:${PORT}${PATHV}"
+        if [ "$SCHEME" = "https" ]; then
+            echo "  （面板开了 SSL，证书是自签的 —— 浏览器会提示不安全，点继续即可）"
+        fi
         echo ""
         echo "【账号】（每台设备独立随机）"
         echo "  用户名：${U}"
@@ -443,8 +450,35 @@ step_patch() {
     if printf '%s' "$vout" | grep -q '未生效'; then
         warn "补丁有没生效的条目（见上）。装了 nodejs 再跑一次 patch 步骤即可补齐（幂等）"
     fi
-    log "装 chroot 服务兼容层（systemctl/service/start-stop-daemon/iptables-legacy）"
-    sh "$REPO_DIR/install/chroot-compat-layer.sh"
+    # ---- 关掉面板的「自动申请 IP 证书」 ----
+    # 实测（2026-09-22）：面板装完后不到 1 小时，task.py 里那个 interval=3600 的
+    # `check_panel_ssl` 任务就会调 script/panel_ssl_task.py 给面板 IP 签一张自签证书，
+    # 然后写 data/ssl.pl=True —— 面板从此**只收 HTTPS**：
+    #   明文 http://127.0.0.1:<端口>/<入口> 连上就被 reset（curl 报 000，不是 404），
+    #   非常容易误判成「面板没起来 / 端口不对」。
+    # 而本项目的文档、模块开机自检、action.sh 打印的地址全是 http://。
+    # 三层都堵：拿掉 ssl.pl（立刻恢复 http）→ 把那个脚本换成空壳（每小时那趟不再打开它）
+    # → 清掉它的状态文件。想用 HTTPS 就把它换回来并重新申请（见 module/README）。
+    log "关闭面板自动 SSL（否则面板只收 HTTPS，明文 http 连不上）"
+    SSL_TASK="$ROOT/www/server/panel/script/panel_ssl_task.py"
+    if [ -f "$SSL_TASK" ] && ! grep -q 'MOLI_SSL_OFF' "$SSL_TASK" 2>/dev/null; then
+        cp -f "$SSL_TASK" "$SSL_TASK.moli-orig" 2>/dev/null || true
+        cat > "$SSL_TASK" <<'EOS'
+# MOLI_SSL_OFF：茉莉定制 —— 本脚本被换成空壳。
+# 原版会调 auto_apply_ip_ssl.py 给面板 IP 申请证书并写 data/ssl.pl=True，
+# 于是面板只收 HTTPS，而本项目的文档/开机自检/地址打印都是 http://。
+# 原版在同目录 panel_ssl_task.py.moli-orig；想恢复自动 SSL 就换回来，
+# 再删掉自己的替换（本文件）并重新申请证书即可。
+import sys
+sys.exit(0)
+EOS
+        chmod 700 "$SSL_TASK"
+        log "  已空壳化 panel_ssl_task.py（原版存同目录 .moli-orig）"
+    fi
+    rm -f "$ROOT/www/server/panel/data/ssl.pl" "$ROOT/www/server/panel/data/check_ssl_cron.pl"
+    log "  已移除 data/ssl.pl（面板回到只监听明文 HTTP）"
+
+    log "装 chroot 服务兼容层（systemctl/service/start-stop-daemon/iptables-legacy）"    sh "$REPO_DIR/install/chroot-compat-layer.sh"
     log "Android paranoid-network 修正（MariaDB 监听 3306 必需）"
     sh "$REPO_DIR/install/android-network-fix.sh"
     in_chroot '/etc/init.d/bt restart' || true

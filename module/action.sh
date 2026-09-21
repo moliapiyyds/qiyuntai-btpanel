@@ -54,10 +54,15 @@ PATHV=$(cat "$ROOT/www/server/panel/data/admin_path.pl" 2>/dev/null)
 [ -z "$PATHV" ] && PATHV=/bt
 IP=$(ip -4 addr show wlan0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
 [ -z "$IP" ] && IP=$(ip -4 addr 2>/dev/null | awk '/inet /{print $2}' | grep -v '^127\.' | cut -d/ -f1 | head -1)
-URL="http://127.0.0.1:${PORT}${PATHV}"
+# 协议按面板实际配置来：bt 那个「自动申请 IP 证书」任务会写 data/ssl.pl=True，
+# 面板就只收 HTTPS（那时 http 连上会被 reset、curl 退出码 56，看着像面板没起来）。
+SCHEME=http
+[ -f "$ROOT/www/server/panel/data/ssl.pl" ] && SCHEME=https
+URL="${SCHEME}://127.0.0.1:${PORT}${PATHV}"
 
 httpcode() {
-    in_chroot "curl -sS -m 8 -A 'Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' -o /dev/null -w '%{http_code}' $1" 2>/dev/null | tail -1
+    # -k：面板自签证书时不去校验证书链，否则拿不到状态码
+    in_chroot "curl -sSk -m 8 -A 'Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' -o /dev/null -w '%{http_code}' $1" 2>/dev/null | tail -1
 }
 
 # ---------- 凭据文件：不存在就现场生成 ----------
@@ -74,8 +79,8 @@ print(r[0][0] if r else \"\")"' 2>/dev/null | tr -d '\r' | tail -1)
         echo "栖云台 · 宝塔面板 访问信息（作者：茉莉 QQ:1265274322 群:570387739）"
         echo ""
         echo "【地址】"
-        echo "  手机/设备内： http://127.0.0.1:${PORT}${PATHV}"
-        echo "  局域网电脑 ： http://${IP}:${PORT}${PATHV}"
+        echo "  手机/设备内： ${SCHEME}://127.0.0.1:${PORT}${PATHV}"
+        echo "  局域网电脑 ： ${SCHEME}://${IP}:${PORT}${PATHV}"
         echo ""
         echo "【账号】"
         echo "  用户名：${U}"
@@ -247,7 +252,9 @@ esac
 echo ""
 echo "【登录信息】"
 if [ -f "$INFO" ]; then
-    sed -e 's#http://[0-9][0-9.]*:[0-9]*/#http://'"$IP"':'"$PORT"'/#' "$INFO"
+    # 凭据文件里烘的是打补丁那会儿写的地址；面板协议/局域网 IP 可能已经变了，
+    # 这里把协议与 IP:端口 换成当前的（凭据文件本身不动）
+    sed -e 's#https\?://[0-9][0-9.]*:[0-9]*/#'"$SCHEME"'://'"$IP"':'"$PORT"'/#' "$INFO"
 else
     echo "  凭据文件不存在：$INFO"
 fi
@@ -255,7 +262,7 @@ fi
 echo ""
 echo "【当前地址】"
 echo "  手机/设备内： $URL"
-[ -n "$IP" ] && echo "  局域网电脑 ： http://${IP}:${PORT}${PATHV}"
+[ -n "$IP" ] && echo "  局域网电脑 ： ${SCHEME}://${IP}:${PORT}${PATHV}"
 echo "  提示：必须用浏览器打开（curl 会被宝塔反爬虫拦成 404）"
 echo "  诊断：$MODDIR/action.sh diag"
 

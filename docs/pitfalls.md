@@ -108,6 +108,37 @@ if public.is_spider(): return abort(404)
 `make -j6` 编 MariaDB 10.11（带 rocksdb/mroonga 引擎）峰值会吃掉 2 GB 左右；
 设备总内存 5.83 GB、可用 3 GB 时能过，但装东西前最好先释放内存。
 
+### 9. 面板会自己开 SSL，然后明文 HTTP 就连不上了（2026-09-22 实测）
+
+装完面板不到一小时，`task.py` 里那个 `interval=3600` 的 `check_panel_ssl` 任务
+（名字叫「面板SSL证书监控」）就会拉起 `script/panel_ssl_task.py` → `auto_apply_ip_ssl.py`，
+给面板 IP 签一张自签证书并写 `data/ssl.pl=True`。从此面板**只收 HTTPS**：
+
+```
+$ curl -v -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' http://127.0.0.1:26358/7318e9d4
+* Connected to 127.0.0.1 (127.0.0.1) port 26358
+> GET /7318e9d4 HTTP/1.1
+* Recv failure: Connection reset by peer      ← 注意：不是 404，是连接被重置
+$ curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:26358/7318e9d4
+404                                            ← 证书在、服务在（这个 404 是 curl 的 UA 被反爬虫拦的）
+```
+
+**为什么这个坑特别毒**：端口在 `LISTEN`、面板进程活着、日志里什么都没有，
+只有连接被 reset —— 极易误判成「面板没起来 / 端口写错了 / 入口路径不对」，
+于是往完全错误的方向查。本机就是靠 `WSGI test_client` 直接打 app 拿到 **200** 才定位到
+「不是应用层、是传输层」。
+
+**修法（三层，`install/qiyuntai-install.sh` 的 `step_patch` 里）**：
+1. 删 `data/ssl.pl`（立刻恢复明文 HTTP）
+2. 把 `script/panel_ssl_task.py` 换成空壳（原版留在同目录 `.moli-orig`）——
+   不换的话那个每小时的定时任务会再把它打开
+3. 顺手删 `data/check_ssl_cron.pl`（它自己写的状态文件）
+
+同时 `module/service.sh` 的开机自检与 `module/action.sh` 的地址打印都会
+按 `data/ssl.pl` 是否存在来决定用 `http://` 还是 `https://`，
+自检失败时还会补试一次 HTTPS，这样即使有人手动开了 SSL，日志里也不是一句干巴巴的
+「未响应」。
+
 ---
 
 ## 二、chroot / Android 侧

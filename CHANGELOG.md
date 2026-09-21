@@ -46,6 +46,19 @@
   所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
   （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
 
+### 面板自己会开 SSL，明文 http 连不上（这轮最毒的一个坑）
+
+* 装完面板不到一小时，`task.py` 里那个 `interval=3600` 的 `check_panel_ssl`
+  任务就会拉起 `script/panel_ssl_task.py` 给面板 IP 签自签证书并写 `data/ssl.pl=True`，
+  面板从此**只收 HTTPS**。实测表现是：端口在 `LISTEN`、进程活着、日志干净，
+  但明文 HTTP 连上就被 **reset**（curl 报 000，不是 404）——
+  极易误判成「面板没起来 / 端口错 / 入口错」。
+  本机是靠 `WSGI test_client` 直接打 app 拿到 200 才定位到「问题在传输层不在应用层」。
+* 修法三层：删 `data/ssl.pl` → 把 `panel_ssl_task.py` 空壳化（原版留 `.moli-orig`）→
+  删 `data/check_ssl_cron.pl`。修完实测：明文 HTTP + 浏览器 UA → **200**。
+* `service.sh` 的开机自检现在 http 失败会补试一次 https（并提示面板开了 SSL），
+  `action.sh` 与凭据文件里的地址按 `data/ssl.pl` 决定协议 —— 不再一律写 `http://`。
+
 ### 打补丁时缺 `node`，把补丁打成了「半截」
 
 * `tools/moli_patch.py` 的前端几步要用 `node --check` 校验改过的 JS，而 `node` 在

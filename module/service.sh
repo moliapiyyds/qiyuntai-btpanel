@@ -257,8 +257,16 @@ sleep 5
 PORT=$(cat "$ROOT/www/server/panel/data/port.pl" 2>/dev/null)
 PATHV=$(cat "$ROOT/www/server/panel/data/admin_path.pl" 2>/dev/null)
 log "面板端口=$PORT 入口=$PATHV"
-if run_in "curl -sS -m 8 -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36' -o /dev/null -w '%{http_code}' http://127.0.0.1:${PORT}${PATHV}"; then
-    log "面板自检：已响应"
+# 自检两种协议都试：面板可能被 bt 那个「自动申请 IP 证书」任务切成只收 HTTPS
+# （写了 /www/server/panel/data/ssl.pl=True），那时明文 http 连上就被 reset，
+# 而 curl 的退出码是 56 —— 只看 http 会误报「未响应」。
+UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+if run_in "curl -sS -m 8 -A '$UA' -o /dev/null http://127.0.0.1:${PORT}${PATHV}"; then
+    log "面板自检：已响应（http://127.0.0.1:${PORT}${PATHV}）"
+elif run_in "curl -sSk -m 8 -A '$UA' -o /dev/null https://127.0.0.1:${PORT}${PATHV}"; then
+    log "面板自检：已响应，但只收 HTTPS —— 面板 SSL 是开着的（data/ssl.pl）"
+    log "          请用 https://127.0.0.1:${PORT}${PATHV} 访问；证书是自签的会有浏览器告警"
+    log "          想关掉：chroot $ROOT rm -f /www/server/panel/data/ssl.pl && /etc/init.d/bt restart"
 else
     log "面板自检：未响应（请看 $ROOT/www/server/panel/logs/error.log）"
 fi

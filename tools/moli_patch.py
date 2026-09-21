@@ -69,7 +69,7 @@ BK = os.path.join(PANEL, 'moli_patch', 'backup_' + TS)
 
 
 def do_revert():
-    """从最新的 backup_* 目录还原成原版。
+    """还原成原版。
 
     为什么需要：tools/make_image.sh 要冻一个**未打补丁**的镜像。
     理由（重要）：
@@ -77,6 +77,13 @@ def do_revert():
          不重建几个 GB 镜像的前提下更新补丁。
       2) 部署时在原版上打补丁，backup_* 里才是真原版，回滚点才成立。
       3) 补丁只改面板的 py/html/js，几秒钟的事。
+
+    【2026-09-22 修】以前只从**最新**那个 backup_* 里还原，这是错的：
+    补丁可能分多次跑（实测就是——先打后端、装完 node 再补前端），
+    而后一次的备份里存的是「已经打过补丁」的内容。结果 revert 只还原了一部分文件，
+    剩下的补丁留在树里，而 make_image.sh 却以为「镜像里是原版」——
+    这种失真不会报错，只会让镜像悄悄带着补丁。
+    现在的做法：**每个文件取最早那份备份**（最早 = 第一次打补丁之前 = 真原版）。
 
     注意：只还原被 backup() 记过的文件。补丁**新建**的少数数据文件
     （如 data/initBind.pl 这类"已绑定"标记）不会被删 —— 它们是纯数据，
@@ -90,14 +97,17 @@ def do_revert():
     if not dirs:
         say('[失败] %s 下没有 backup_* 目录' % mp)
         return 1
-    bk = dirs[-1]
-    say('用最新的备份目录还原：%s' % bk)
+    say('备份目录 %d 个（%s … %s），每个文件取最早那份' % (
+        len(dirs), os.path.basename(dirs[0]), os.path.basename(dirs[-1])))
+    first = {}
+    for d in dirs:  # sorted 已经是老的在前
+        for name in sorted(os.listdir(d)):
+            if name not in first and os.path.isfile(os.path.join(d, name)):
+                first[name] = os.path.join(d, name)
     n = 0
     skip = 0
-    for name in sorted(os.listdir(bk)):
-        src = os.path.join(bk, name)
-        if not os.path.isfile(src):
-            continue
+    for name in sorted(first):
+        src = first[name]
         rel = name.replace('__', '/')
         dst = os.path.normpath(os.path.join(PANEL, rel))
         # 防目录穿越：备份名是从相对路径拍平的，但还是校验一次
@@ -142,13 +152,23 @@ def wr(p, s, mode=0o600):
 
 
 def backup(rel):
+    """把文件的原版留底。
+
+    【2026-09-22 修】只有在**任何旧备份目录里都还没存过这个文件**时才写新的。
+    原因：备份目录是每次运行一个新目录（backup_<TS>），而「原版」只存在于
+    第一次打补丁之前的那一刻。补丁分多次跑（实测：先打后端、装完 node 再补前端）时，
+    后来的备份里存的是「已经打过补丁」的内容 —— 那就是假的回滚点。
+    """
     src = os.path.join(PANEL, rel)
     if not os.path.exists(src):
         return
+    flat = rel.replace('/', '__')
+    mp = os.path.dirname(BK)
+    for d in sorted(glob.glob(os.path.join(mp, 'backup_*'))):
+        if os.path.exists(os.path.join(d, flat)):
+            return  # 更早的目录里已经有真原版了
     os.makedirs(BK, exist_ok=True)
-    dst = os.path.join(BK, rel.replace('/', '__'))
-    if not os.path.exists(dst):
-        shutil.copy2(src, dst)
+    shutil.copy2(src, os.path.join(BK, flat))
 
 
 def py_ok_path(p):
