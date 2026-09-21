@@ -125,16 +125,15 @@ step_deps() {
       glib2 glib2-devel libstdc++ libstdc++-devel perl perl-devel perl-Data-Dumper \
       vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel \
       expect openssh-server openssh-clients'
-    # 运行时组件（不是编译依赖）：宝塔的 redis / memcached 插件要用这两个二进制。
-    # 单独一条、允许失败 —— 免得某个包名在别的 openEuler 版本里不存在，把上面
-    # 那条大的 dnf 事务一起搞挂。
+    # 运行时组件（不是编译依赖）：这里只留 redis 当兜底。
     # 注意版本差异（实测）：openEuler 源里是 redis 7.2.15 / memcached 1.6.22，
-    # 而本机基线记的是 7.2.16 / 1.6.45 —— 说明旧环境那份是面板插件自带的。
-    # 所以这里只是兜底，真正的来源是 step_plugins 里的插件。
-    if in_chroot 'dnf install --skip-broken -y redis memcached' >/dev/null 2>&1; then
-        log "已装 redis / memcached（dnf 兜底）"
+    # 而基线记的是 redis 7.2.16 / memcached 1.6.45 —— 基线那两份都是宝塔自带的
+    # （redis 由 redis 插件装到 /www/server/redis，memcached 由 step_memcached 从
+    # 宝塔源码包编到 /usr/local/memcached）。所以 dnf 这条只是「万一」用的。
+    if in_chroot 'dnf install --skip-broken -y redis' >/dev/null 2>&1; then
+        log "已装 redis（dnf 兜底）"
     else
-        warn "redis / memcached 的 dnf 安装没成功（面板插件可能会自带，继续）"
+        warn "redis 的 dnf 安装没成功（面板 redis 插件会自带，继续）"
     fi
 
     in_chroot 'id www >/dev/null 2>&1 || { NOLOGIN=/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/usr/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/bin/false; groupadd www; useradd -s $NOLOGIN -g www www; }'
@@ -333,6 +332,57 @@ step_plugins() {
     log "插件步骤完成：$n/$(printf '%s\n' $PLUGINS | wc -l) 个在位"
     # 缺插件就失败，不要静默放过 —— 文档承诺它们都在，缺了就不是同一个环境
     [ -z "$bad" ] || fail "这些插件没装上：$bad"
+
+    step_memcached
+}
+
+# memcached：从宝塔的源码包自己编（1.6.45）
+#
+# 【为什么不能只 dnf 装】
+#   面板 13.0.0 的 install/install_soft.sh 里**已经没有 memcached** 了
+#   （grep 全无），商店那 9 个插件里也没有 memcached 插件；而基线那台的
+#   /etc/init.d/memcached 是 2019-09-19 的宝塔脚本，里面写死
+#   `/usr/local/memcached/bin/memcached -d -l 127.0.0.1 -p 11211 -u memcached -m 64 -c 1024`。
+#   实测 download.bt.cn 上只有 memcached-1.6.45.tar.gz 返回 200
+#   （1.6.22 / 1.6.38 都是 404），而 openEuler 源里只有 1.6.22 ——
+#   所以基线那份 1.6.45 就是从宝塔源码包编出来的，只靠 dnf 装不出同一个版本。
+MC_URL="https://download.bt.cn/src/memcached-1.6.45.tar.gz"
+MC_SHA="d362c64e6d8d5287153501eabf7c85b4a761432fbf53f5d7b085d0bb1653c1dd"
+MC_PREFIX=/usr/local/memcached
+
+step_memcached() {
+    if [ -x "$ROOT$MC_PREFIX/bin/memcached" ]; then
+        log "memcached 已在 $MC_PREFIX，跳过"
+        return 0
+    fi
+    log "编译 memcached 1.6.45（宝塔源码包 → $MC_PREFIX）"
+    local ok=0 sha
+    if in_chroot "curl -fsSL -o /tmp/mc.tar.gz '$MC_URL'"; then
+        sha=$(in_chroot 'sha256sum /tmp/mc.tar.gz' | awk '{print $1}' | tr -d '\r')
+        if [ "$sha" = "$MC_SHA" ]; then
+            log "  源码包 sha256 与记录一致"
+        else
+            warn "  源码包 sha256 变了（记录 $MC_SHA，实际 ${sha:-取不到}），继续但留意"
+        fi
+        # 顶层目录名带版本号，用通配而不是写死，免得宝塔换了包就直接失败
+        if in_chroot 'mkdir -p /tmp/mcbuild && tar -xzf /tmp/mc.tar.gz -C /tmp/mcbuild \
+             && cd /tmp/mcbuild/memcached-* \
+             && ./configure --prefix='"$MC_PREFIX"' >/tmp/mc_conf.log 2>&1 \
+             && make -j4 >/tmp/mc_make.log 2>&1 \
+             && make install >/tmp/mc_install.log 2>&1'; then
+            ok=1
+        fi
+    fi
+    if [ "$ok" = "1" ] && [ -x "$ROOT$MC_PREFIX/bin/memcached" ]; then
+        log "  memcached 就绪：$(in_chroot "$MC_PREFIX/bin/memcached --version" | tr -d '\r' | tail -1)"
+        in_chroot 'rm -rf /tmp/mcbuild /tmp/mc.tar.gz /tmp/mc_conf.log /tmp/mc_make.log /tmp/mc_install.log' || true
+    else
+        warn "从宝塔源码包编 memcached 失败，退回 openEuler 源的 1.6.22（与基线版本不同，功能一样）"
+        in_chroot 'dnf install --skip-broken -y memcached' || warn "  dnf 兜底也没成"
+    fi
+    # 基线那个 init 脚本用 -u memcached，所以得有这个用户
+    in_chroot 'id memcached >/dev/null 2>&1 || useradd -r -s /sbin/nologin -d /var/lib/memcached memcached' \
+        || warn "  建 memcached 用户失败（init 脚本会退化成 -u root）"
 }
 
 # ---------------- 6) 补丁 + 兼容层 ----------------

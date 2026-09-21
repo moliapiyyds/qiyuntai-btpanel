@@ -174,6 +174,16 @@ ipset v7.19: Kernel error received: Invalid argument
   **注意**：只把 `.initd` 放进仓库是不生效的 —— 在接上 `step_patch` 之前，
   `crond.initd` / `tomcat.initd` 就在仓库里躺了很久，但没有任何脚本引用它们。
 
+* 顺带查出**memcached 这个二进制本身**也没有来源：面板 13.0.0 的
+  `install/install_soft.sh` 里已经搜不到 memcached，商店那 9 个插件里也没有它，
+  openEuler 源里只有 1.6.22。而基线那台是 **1.6.45**，装在最老的
+  `/etc/init.d/memcached`（2019-09-19 的宝塔脚本）写死的 `/usr/local/memcached/bin/memcached`。
+  实测宝塔下载站上 `https://download.bt.cn/src/memcached-1.6.45.tar.gz` 返回 **200**，
+  而 1.6.22 / 1.6.38 都是 **404** —— 基线那份就是这个源码包编的。
+  现在 `step_memcached` 照这个路径编（sha256 pin 在脚本里），编不出来才退回 dnf 的 1.6.22。
+  README 里也写着「面板商店判断 Memcached 装没装，看的是
+  `/usr/local/memcached/bin/memcached` 这个路径」—— 装到别处面板永远显示未安装。
+
 ### 7. 同一类问题还有 sshd（不是 init 脚本，是「配置 + 软件包」）
 `module/service.sh` 第 4.7 段用 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
 但既没有脚本装 `openssh-server`，也没有脚本写这个配置文件 —— 缺了就走到

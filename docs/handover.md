@@ -67,7 +67,7 @@
 ```
 id            qiyuntai_btpanel
 name          栖云台·宝塔面板
-版本          v1.2.4   (versionCode 10204)
+版本          v1.2.5   (versionCode 10205)
 作者          茉莉 QQ:1265274322  官方Q群:570387739
 目录          /data/adb/modules/qiyuntai_btpanel/
 日志          /data/adb/modules/qiyuntai_btpanel/boot.log

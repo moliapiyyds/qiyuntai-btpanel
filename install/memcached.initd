@@ -20,9 +20,10 @@
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-# 二进制：dnf 装在 /usr/bin；宝塔的 memcached 管理器装在 /usr/local/memcached/bin
+# 二进制：宝塔源码包装在 /usr/local/memcached（基线就是这份，1.6.45）；
+# 编不出来时才退回 dnf 装在 /usr/bin 的 1.6.22
 BIN=""
-for b in /usr/bin/memcached /usr/sbin/memcached /usr/local/memcached/bin/memcached; do
+for b in /usr/local/memcached/bin/memcached /usr/bin/memcached /usr/sbin/memcached; do
     [ -x "$b" ] && BIN="$b" && break
 done
 
@@ -39,10 +40,13 @@ running() {
     kill -0 "$p" 2>/dev/null
 }
 
-# memcached 不允许以 root 运行，所以有 memcached 用户就降权
+# memcached 不允许直接以 root 运行：有 memcached 用户就降权，
+# 没有就显式 -u root（不给 -u 它自己会拒绝启动）
 USER_OPT=""
 if id memcached >/dev/null 2>&1; then
     USER_OPT="-u memcached"
+elif [ "$(id -u)" = "0" ]; then
+    USER_OPT="-u root"
 fi
 
 start() {

@@ -6,10 +6,16 @@
 
 ---
 
-## 未发布（相对 v1.2.4）
+## v1.2.5 — 2026-09-22
 
-> 这一段改的全部是 `install/` 里的部署脚本和 README 的清单，**模块本体没动**，
-> 所以没有升 `module/module.prop` 的版本号 —— 等下一版模块和预制镜像一起发时再统一升。
+`versionCode = 10205`
+
+这一版改的主体是**部署脚本**（`install/`）和随之重打的**预制镜像**：把「文档里承诺了、
+脚本从没做过」的东西一处一处补上（下面四条都是这一轮的实测收获）。`module/` 的**代码逻辑没改**，
+只动了 `module.prop` 的版本号 —— 切版本号是为了让「tag / Release 附件 / 预制镜像」
+三者指向同一个提交，不然镜像里的脚本是 main、tag 却停在 v1.2.4。
+
+> 下面这些条目相对 v1.2.4 的增量。
 
 ### `crond` / `tomcat` / `memcached` 的 init 脚本从来没被装进 chroot
 
@@ -32,6 +38,13 @@
 * 同一次对账里发现 `memcached` 连 `.initd` 都没有，补了 `install/memcached.initd`
   （openEuler 的 memcached 包只带 systemd 单元，chroot 里没有 systemd；宝塔那 9 个插件
   里也没有 memcached 插件），一并纳入 `step_patch` 的安装清单。
+* 再往下追一层发现**连 memcached 这个二进制都没有来源**：面板 13.0.0 的
+  `install_soft.sh` 里已经搜不到 memcached，openEuler 源里只有 1.6.22，而基线是 **1.6.45**
+  装在 `/usr/local/memcached/bin/memcached`（2019 年那份宝塔 init 脚本写死的路径，
+  也正是 README 里写的「面板商店判断装没装」的路径）。
+  实测宝塔下载站上 **只有** `memcached-1.6.45.tar.gz` 返回 200（1.6.22 / 1.6.38 都是 404），
+  所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
+  （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
 
 ### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
 
