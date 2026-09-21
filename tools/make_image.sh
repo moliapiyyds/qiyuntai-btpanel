@@ -196,7 +196,10 @@ say "清理后：${AFTER} MB（省了 $((BEFORE - AFTER)) MB）"
 # ---------- 写清单 ----------
 echo ""
 echo "---- 写镜像清单 ----"
-MANI="$ROOT/IMAGE-MANIFEST.txt"
+# 注意：清单要写到 $OUT，**不能写到 $ROOT** —— $ROOT 下面就是马上要 tar 的整棵树，
+# 写进去等于把清单也冻进镜像（之前就是这么写的，结果清单既进了镜像又没被上传）。
+mkdir -p "$OUT" || die "建不了 $OUT"
+MANI="$OUT/IMAGE-MANIFEST.txt"
 {
     echo "=== 栖云台预制镜像清单 ==="
     echo "打包时间     : $($BB date '+%Y-%m-%d %H:%M:%S')"
@@ -291,7 +294,7 @@ echo " 清单     : $MANI"
 echo " 校验     : $OUT/SHA256SUMS.txt"
 echo ""
 echo " 上传 Release（在电脑上）："
-echo "   gh release upload <tag> $OUT/qyt-image.part-* $OUT/SHA256SUMS.txt \\"
+echo "   gh release upload <tag> $OUT/qyt-image.part-* $OUT/SHA256SUMS.txt $MANI \\"
 echo "      -R moliapiyyds/qiyuntai-btpanel"
 echo "============================================================"
 exit 0
