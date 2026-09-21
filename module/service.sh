@@ -228,6 +228,26 @@ if ! run_in "[ -x /etc/init.d/redis ]"; then
     fi
 fi
 
+# ---------- 4.7) SSH 兜底通道（adb 不可用时唯一的救命通道，务必保留）----------
+SSHD_CFG_OUT="$ROOT/etc/ssh/sshd_config_moli"
+SSHD_CFG_IN="/etc/ssh/sshd_config_moli"
+if [ -f "$SSHD_CFG_OUT" ]; then
+    if run_in "pgrep -x sshd >/dev/null"; then
+        log "sshd 已在运行，监听 :22"
+    else
+        log "启动 sshd（配置 $SSHD_CFG_IN）"
+        run_in "/usr/sbin/sshd -f $SSHD_CFG_IN"
+        sleep 2
+        if run_in "pgrep -x sshd >/dev/null"; then
+            log "sshd 启动成功，监听 :22"
+        else
+            log "警告：sshd 启动失败，检查 $SSHD_CFG_OUT 与主机密钥"
+        fi
+    fi
+else
+    log "未找到 $SSHD_CFG_OUT，跳过 sshd"
+fi
+
 # ---------- 5) 自检 ----------
 sleep 5
 PORT=$(cat "$ROOT/www/server/panel/data/port.pl" 2>/dev/null)

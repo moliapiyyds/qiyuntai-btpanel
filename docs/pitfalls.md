@@ -279,3 +279,76 @@ PC is at net_hw_hook_localout+0x170/0x22c     x0 = 0x0000000000030000
 
 **通用教训**：内核树里存在「编译器生成的 `.S`」时，config 中任何影响核心结构体布局的开关
 都不能随手打开 —— 偏移是编译期烘进二进制的，改 config 等于悄悄改变访存语义，**编译器不会报任何错**。
+
+---
+
+## 六、部署 / 救援侧的坑（2026-09-21 补）
+
+### 1. `adb shell su -c "A; B"` 会吃掉引号，后半段变成非 root 执行
+
+**现象**：脚本明明写了 `id -u` 检查 root，却报「需要 root」。
+
+**原因**：`adb shell` 会把参数拼成一个字符串丢给设备端 shell 重新解析，
+所以 `adb shell su -c "rm -rf /x; sh /sdcard/y.sh"` 到设备上变成
+`su -c rm` + `-rf /x` + `;` + `sh /sdcard/y.sh` ——
+`su -c` 只拿到了 `rm`，**后面那条 `sh` 是普通 shell 用户（uid 2000）跑的**。
+
+**正确写法**：整条远端命令再包一层双引号，让设备端 shell 看到 `su -c '...'`
+
+```sh
+# 错
+adb shell su -c "for m in a b; do umount /x/$m; done; rm -rf /x"
+# 对
+adb shell "su -c 'for m in a b; do umount /x/\$m; done; rm -rf /x'"
+```
+
+**判别方法**：在脚本里打印 `id`。如果看到 `uid=2000(shell)` 就说明引号掉了。
+
+> 补充：这套设备上 `adb root` 模块会让 adbd 落在 `u:r:su:s0`，此时 `pm` / `am` / `cmd`
+> 会报 `Failed transaction (2147483646)`（binder 跨域拒绝）。
+> 需要 `pm`/`am` 时把 adbd 切回 shell 域，或者干脆用 root 直接读写文件。
+
+### 2. 含 bind 挂载的目录树**绝对不能**直接 `rm -rf`  ← 这次把 `/dev` 删了
+
+**事故**：在 `/data/oe_test` 下挂过 `mount --bind /dev`、`mount -t proc` 等用于验证 chroot。
+清理时先 `umount -l`（lazy）紧接着 `rm -rf /data/oe_test`，`rm` 走进了 bind 过来的**真实 `/dev`**，
+删掉了字符设备节点。
+
+**后果**（不是立刻炸，是慢慢烂）：
+* `/dev/null` 被后续进程按普通文件重新创建（54 字节），SELinux 标签是 `device` 而不是 `null_device`
+* `zygote` 打开 `/dev/null` 被拒 → **应用进程起不来 → 桌面进程消失 → 黑屏、按键无响应、控制中心下不来**
+* 长按电源键连关机菜单都不弹（`system_server` 也死了）
+* 内核没 panic、adb 还活着 —— 所以看起来像"死机"，其实是框架全灭
+
+**证据**（出问题时先看这两个）：
+
+```sh
+# 1) 设备节点是不是变成普通文件了（应该是 c 开头）
+ls -l /dev/null /dev/zero /dev/random /dev/urandom /dev/ptmx
+# 2) SELinux 拒绝日志，tclass=file 而不是 chr_file 就说明是普通文件
+dmesg | grep 'name="null"'
+# avc: denied { read write } for pid=... name="null" dev="tmpfs"
+#      scontext=u:r:zygote:s0 tcontext=u:object_r:device:s0 tclass=file
+```
+
+**修法**：`/dev` 是内存文件系统（devtmpfs/tmpfs），**重启即由 ueventd 重建**，
+数据分区一个字节不动。长按电源 20 秒强制重启即可，不需要刷机、不需要恢复出厂。
+重启后核对：`ls -l /dev/null` 应显示 `crw-rw-rw- 1, 3`。
+
+**规矩**（写进脚本了）：
+* 任何 `rm -rf` 之前，先确认目标树下没有活着的挂载点：`mount | grep <目标>`
+* 解挂载后再删；`umount -l` 之后要确认 `mountpoint -q` 已经为假再动手
+* `install/prepare-rootfs.sh` 已加：跑之前先自动解挂载、提供 `--unmount`、
+  且目标目录里已有 `www/server/panel` 时**直接拒绝执行**，绝不覆盖已装好的环境
+
+### 3. Android 9 的 toybox 既没有 `curl` 也没有 `xz`
+
+`install/qiyuntai-install.sh` 原来的 `step_rootfs` 用 `curl` 下载、用 `xz -d` 解压 ——
+**在这台设备上跑不通**（`command -v curl` / `xz` 都为空），当初是手工铺的 rootfs。
+
+现在 `step_rootfs` 优先调用 `install/prepare-rootfs.sh`，后者按
+`curl → wget → busybox wget` 的顺序找下载工具（实测命中
+`/data/adb/ksu/bin/busybox wget`），`xz` 缺失时明确提示改在电脑上解压后 `--tar` 推过来。
+
+**通用教训**：写装机脚本别假设 Android 侧有 GNU 工具链。
+`toybox` 的能力集随机型/版本变化，能用的东西先 `command -v` 探一遍再决定分支。

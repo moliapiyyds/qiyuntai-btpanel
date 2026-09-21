@@ -10,10 +10,18 @@
 
 | 项 | 值 |
 | --- | --- |
-| 局域网地址 | **http://<手机IP>:<端口>/<入口>** |
-| 设备内地址 | http://127.0.0.1:<端口>/<入口> |
-| 账号 / 密码 | `<用户名>` / `<密码>` |
+| 局域网地址 | `http://<手机IP>:<端口>/<入口>` |
+| 设备内地址 | `http://127.0.0.1:<端口>/<入口>` |
+| 账号 / 密码 | 安装时随机生成，见下方读取方式 |
 | 端口 / 入口 | `/data/openeuler/www/server/panel/data/{port.pl,admin_path.pl}` |
+
+> 本机的真实地址与口令**不写进这个文件**（仓库是公开的）。
+> 本机实况记录在 `docs/private-deployment.md`（已 `.gitignore`，只在本地存在）。
+>
+> 不知道自己这台的值？三个办法：
+> 1. 点模块的「执行」按钮 —— 会打印地址、账号、密码，并用浏览器打开面板
+> 2. 读凭据留档：`cat /data/openeuler/root/qiyuntai-panel-info.txt`（root 权限，600）
+> 3. 直接读配置：`cat .../panel/data/port.pl` 和 `.../panel/data/admin_path.pl`
 
 * 从电脑实测：`HTTP=200 用时=0.82s`。
 * 必须用**浏览器**打开；`curl` 默认 UA 会被宝塔反爬虫丢 404（宝塔自身行为）。
@@ -58,19 +66,38 @@ phpMyAdmin 那条显示「已停止」是宝塔语义（未对公网开放），
 ```
 id            qiyuntai_btpanel
 name          栖云台·宝塔面板
-版本          v1.0.0
-作者          茉莉 QQ:1265274322
+版本          v1.2.3   (versionCode 10203)
+作者          茉莉 QQ:1265274322  官方Q群:570387739
 目录          /data/adb/modules/qiyuntai_btpanel/
 日志          /data/adb/modules/qiyuntai_btpanel/boot.log
 ```
 
 `service.sh` 开机流程（幂等）：等 `sys.boot_completed` → 挂载 /dev /dev/pts /dev/shm /proc /sys → 写 DNS
-→ Android paranoid-network 修正（mysql/www/redis 加入 inet 组 + 校正 MariaDB 数据目录属主）
-→ 启动 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / redis → 面板自检。
+→ Android paranoid-network 修正（`mysql`/`redis`/`www` 加入 `inet` 组 + 校正 MariaDB 数据目录属主）
+→ 清理陈旧 pid 文件 → 启动
+**bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / redis / memcached / tomcat / supervisord**
+→ sshd 兜底（第 4.7 段，`/etc/ssh/sshd_config_moli`，监听 `:22`）→ 面板自检。
+
+> `sshd` 那段是**救命通道**：adb 不通时它是唯一入口，所以放在服务链最后并且幂等
+> （已在跑就只记日志，不重复拉起）。
 
 `uninstall.sh`：**只停服务 + 解挂载，不删 /data/openeuler**。
 
-### 重启实测（共 3 次，最后一次为最终版）
+`action.sh`（模块「执行」按钮）支持四种模式：
+
+| 调用 | 行为 |
+| --- | --- |
+| `action.sh` | 打印地址账号密码 + 补拉未起的服务 + 用浏览器打开面板（KSU 按钮走这个） |
+| `action.sh start` | 只补拉服务 |
+| `action.sh diag` | 只做诊断：挂载点 / chroot 可用性 / inet 组 / 服务进程 / 端口 / 面板自检 / boot.log 报错 / 磁盘 / 破解补丁，**不重启任何服务** |
+| `action.sh info` | 只打印登录信息 |
+
+出问题第一件事就跑 `sh /data/adb/modules/qiyuntai_btpanel/action.sh diag`。
+另外主流程下面板自检若不是 `HTTP 200`，会自动附上一份诊断摘要。
+
+### 重启实测
+
+**v1.0.0 时期（2026-09-20 04:50，第 3 次重启）**
 
 ```
 [04:50:09] 启动 Nginx/OpenResty (nginx) → Starting nginx... done
@@ -82,7 +109,22 @@ name          栖云台·宝塔面板
 [04:50:23] 面板自检：已响应（HTTP=200）
 ```
 
-重启后：端口 80 / 888 / 3306 / <端口> 全部在监；MariaDB、Redis、PHP、OpenResty、fail2ban 全部可连。
+**v1.2.3（2026-09-21 19:12，非正常关机后的恢复启动 —— 这次是硬断电重启）**
+
+```
+[19:12:42] php-fpm        → done
+[19:12:42] fail2ban       → Server ready / 启动完成
+[19:12:46] crond          → 启动完成
+[19:12:52] redis          → Starting redis success!
+[19:12:53] memcached      → done
+[19:12:53] tomcat         → 启动完成
+[19:12:59] supervisord    → 启动完成
+[19:13:01] sshd           → 监听 :22
+```
+
+重启后：端口 80 / 888 / 3306 / 6379 / 11211 / 8080 / 22 与面板端口全部在监；
+MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
+`/dev/null` 等设备节点由内核 ueventd 重建（`crw-rw-rw- 1,3`），数据分区一个字节没动。
 
 ---
 

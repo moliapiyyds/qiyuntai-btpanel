@@ -17,7 +17,7 @@
 | 层 | 内容 |
 | --- | --- |
 | 底层 | openEuler 24.03 LTS-SP3 aarch64 chroot，落在 `/data/openeuler`（约 400 MB 起，装完组件约 4-6 GB） |
-| 面板 | 宝塔面板（aarch64 版），端口/入口**随机**（示例 `<端口>` + `/<入口>`），已解锁**永久企业版**、**关闭更新**、**免 bt.cn 绑定** |
+| 面板 | 宝塔面板（aarch64 版），端口/入口**安装时随机**（每台机器不同，见下文「怎么访问」），已解锁**永久企业版**、**关闭更新**、**免 bt.cn 绑定** |
 | 环境组件 | **OpenResty 1.31.1.1**（nginx 卡片的 openresty 版本）、**MariaDB 10.11**、**PHP 8.2**、**phpMyAdmin 5.2**、**Redis 7.2**、**Memcached 1.6**、**Tomcat 9** |
 | 管理插件 | Fail2ban 2.6、Node.js版本管理器（内置 node v20.18.3）、java环境管理器（内置 JDK 17.0.8）、Java项目一键部署、Java项目管理器、Python项目管理器、python环境管理器、Supervisor进程管理器 |
 | 额外环境 | Python 3.13 + pip/venv、OpenJDK 17/11/8（dnf）、Node.js 20 + npm、git/vim/htop/tmux/jq/sqlite3、完整编译链、iptables-legacy |
@@ -32,7 +32,8 @@
 | 设备内 / 手机浏览器 | `http://127.0.0.1:<端口>/<入口>` |
 | 同一 WiFi 的电脑 | `http://手机IP:<端口>/<入口>` |
 
-> 上面的端口 `<端口>` 和入口 `/<入口>` 是**安装时随机生成**的，每台设备都不一样；账号、密码同样随机。
+> `<端口>`、`<入口>`、账号、密码都是**安装时随机生成**的，每台设备都不一样。
+> 查自己的值：点模块「执行」按钮，或读 `/data/openeuler/root/qiyuntai-panel-info.txt`。
 
 **怎么拿到自己的地址和账号密码**（三种方式任意一种）：
 
@@ -141,7 +142,7 @@ docs/                    踩坑记录与原理说明
 ## 六、已验证 / 未验证（诚实清单）
 
 **实测通过（2026-09-20 本机）**
-* 面板安装、登录页 `HTTP 200`、局域网访问 `http://<手机IP>:<端口>/<入口>` → 200
+* 面板安装、登录页 `HTTP 200`、局域网访问 `http://手机IP:<端口>/<入口>` → 200
 * OpenResty **1.31.1.1** 源码编译，`nginx -t` 通过，监听 80 / 888
 * MariaDB **10.11.16** 编译安装，`select version()` → `10.11.16-MariaDB-log`，监听 3306
 * PHP **8.2.33** 编译安装，php-fpm 运行，`/tmp/php-cgi-82.sock` 就绪
@@ -150,7 +151,7 @@ docs/                    踩坑记录与原理说明
 * 补丁生效：`get_soft_list` 返回 `ltd=-2 / pro=-2`（面板显示企业版·永久）、`is_bind()` 恒真、升级脚本已空壳
 * 商店状态核对：nginx / mysql(MySQL 卡片) / php-8.2 / phpmyadmin / fail2ban / nodejs 全部 **已安装**
 * **两次重启实测**：模块自动挂载 chroot、写 DNS、拉起 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / Redis，
-  面板自检 `HTTP=200`，端口 80/888/3306/<端口> 全部监听（日志见 `boot.log`）
+  面板自检 `HTTP=200`，端口 80/888/3306 与面板端口全部监听（日志见 `boot.log`）
 
 **未验证 / 有风险**
 * 面板里 firewalld、Docker、邮件告警、SSL 证书签发、云备份等依赖 systemd/内核/宝塔服务器的功能

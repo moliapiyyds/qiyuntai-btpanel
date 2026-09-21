@@ -34,13 +34,14 @@
 
 | 项 | 谁生成 | 说明 |
 | --- | --- | --- |
-| 端口 | 宝塔安装器随机 | 例：`<端口>`（不是默认 8888） |
-| 入口路径 | 宝塔安装器随机 | 例：`/<入口>` |
-| 用户名 | 宝塔安装器随机 | 例：`<用户名>` |
-| 密码 | **安装脚本用 openssl 生成 16 位随机** | 例：`<密码>` 是首次安装的旧值 |
+| 端口 | 宝塔安装器随机 | 几位数随机（不是默认的 8888） |
+| 入口路径 | 宝塔安装器随机 | 形如 `/` + 8 位随机串 |
+| 用户名 | 宝塔安装器随机 | 8 位随机串 |
+| 密码 | **安装脚本用 openssl 生成 16 位随机** | 每台设备都不一样 |
 
 > 也就是说：**每台设备装出来都不一样**，不会出现"全网同一个密码"的问题。
 > 换设备重装 = 重新随机一次，凭据重新写进上面那个文件。
+> 文档里不写任何一台机器的真实值 —— 本机实况记在本地 `docs/private-deployment.md`（不进仓库）。
 
 ### 怎么改密码 / 端口 / 入口
 
@@ -73,13 +74,15 @@ cd /www/server/panel && ./pyenv/bin/python3 -c "import tools; tools.set_panel_pw
 | 手机本机 / Termux / 设备内 | `http://127.0.0.1:<端口>/<入口>` |
 | 同一 WiFi 下的电脑、平板 | `http://手机IP:<端口>/<入口>` |
 
-* 手机 IP 在「设置 → WLAN → 当前网络」里看（本机实测为 `<手机IP>`）。
-* 端口和入口路径存在这两个文件里，随时可以查：
+* 手机 IP 在「设置 → WLAN → 当前网络」里看。
+* `<端口>` 和 `<入口>` 每台机器不同，存这两个文件里，随时可查：
 
 ```sh
-cat /data/openeuler/www/server/panel/data/port.pl        # 端口，默认 <端口>
-cat /data/openeuler/www/server/panel/data/admin_path.pl  # 入口，默认 /<入口>
+cat /data/openeuler/www/server/panel/data/port.pl        # 端口
+cat /data/openeuler/www/server/panel/data/admin_path.pl  # 入口
 ```
+
+* 懒得看文件？点模块的「执行」按钮，会直接把完整地址账号密码打印出来。
 
 * **必须用浏览器打开**：宝塔有反爬虫，`curl` 默认 UA 会被直接丢 404（这是宝塔本身的行为，不是故障）。
 
@@ -125,7 +128,7 @@ bt 6      # 修改面板入口
 [04:35:34] 面板自检：已响应
 ```
 
-重启后复核：面板 `HTTP=200`；端口 **80 / 888 / 3306 / <端口>** 全部在监听；
+重启后复核：面板 `HTTP=200`；端口 **80 / 888 / 3306** 与面板端口全部在监听；
 `select version()` → `10.11.16-MariaDB-log`；`fail2ban-client status` → 2 个 jail（sshd、ftpd）。
 
 > 提醒：`/etc/init.d/nginx status` 在运行时会打印 `already running.` 但返回码是 1，

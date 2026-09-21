@@ -44,9 +44,27 @@ need_root() {
 # ---------------- 1) rootfs ----------------
 step_rootfs() {
     [ -d "$ROOT/www/server/panel" ] && { log "已存在 $ROOT/www/server/panel，跳过 rootfs 部署"; return 0; }
+
+    # 优先用 install/prepare-rootfs.sh：它处理了 toybox 既没有 curl 也没有 xz 的情况
+    # （实测 Android 9 上 curl/wget/xz 都不存在，只有 busybox），
+    # 而且按 manifest.json 的顺序叠加 docker 层，多层镜像也不会解错顺序。
+    pr="$REPO_DIR/install/prepare-rootfs.sh"
+    if [ -f "$pr" ]; then
+        log "用 install/prepare-rootfs.sh 准备 rootfs"
+        sh "$pr" --root "$ROOT" || fail "rootfs 准备失败（按上面输出的提示处理）"
+        return 0
+    fi
+
+    # 兜底：脚本被单独推到 /sdcard（拿不到仓库目录）时走这段内置逻辑
+    log "没找到 $pr，走内置逻辑"
+    command -v curl >/dev/null 2>&1 || fail "这台设备没有 curl（Android 9 toybox 不带）。改为在电脑上下好后推过来：
+      xz -d openEuler-docker.aarch64.tar.xz
+      adb push openEuler-docker.aarch64.tar /sdcard/
+      adb shell su -c \"sh /sdcard/prepare-rootfs.sh --tar /sdcard/openEuler-docker.aarch64.tar\""
+    command -v xz >/dev/null 2>&1 || fail "这台设备没有 xz。改为在电脑上先 xz -d，再按上面的方式推 .tar 过来。"
+
     mkdir -p "$TMP"
     log "查找镜像目录…"
-    local idx
     idx=$(curl -sS -m 30 "$MIRROR/" | grep -oE 'openEuler-docker\.aarch64\.tar\.xz' | head -1)
     [ -n "$idx" ] || fail "镜像目录里没找到 openEuler-docker.aarch64.tar.xz（网络或镜像路径变了）"
     log "下载 rootfs（约 40 MB）…"
@@ -56,7 +74,6 @@ step_rootfs() {
     mkdir -p "$TMP/layer"
     tar -xf "$TMP/oe.tar" -C "$TMP/layer" || fail "tar 解包失败"
     # docker 镜像 tar 里 layer 是 blobs/sha256/<hash>，取最大的那个当 rootfs
-    local layer
     layer=$(find "$TMP/layer" -type f -printf '%s %p\n' 2>/dev/null | sort -rn | head -1 | awk '{print $2}')
     [ -n "$layer" ] || layer="$TMP/oe.tar"
     mkdir -p "$ROOT"

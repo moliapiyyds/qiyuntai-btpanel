@@ -1,7 +1,17 @@
-﻿# 备份/日志
+# 备份 / 日志 / 临时产物
 *.log
 *.bak
+*.tmp
 backup_*/
+*~
+
+# 私有部署实况（含真实内网地址、面板口令、SSH 私钥位置）
+# 仓库是 PUBLIC，这些一律不进版本库
+docs/private-deployment.md
+
+# 打模块 zip 时的临时目录
+_dist/
+
 # Windows
 Thumbs.db
 desktop.ini
