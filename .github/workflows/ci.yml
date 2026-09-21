@@ -1,0 +1,27 @@
+name: CI
+
+# 拦语法类回归：shellcheck + sh -n + python py_compile + node --check
+# 具体检查都在 tools/ci.sh 里，本地可以跑同一个脚本。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu 镜像通常自带 shellcheck，这里显式确认/兜底装一遍，
+      # 免得 ci.sh 在 CI 里静默跳过最重要的一项。
+      - name: 确保 shellcheck 可用
+        run: |
+          shellcheck --version || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+          shellcheck --version
+
+      - name: 仓库自检
+        env:
+          CI: "true"
+        run: sh tools/ci.sh
