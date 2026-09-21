@@ -13,10 +13,13 @@
 #
 # 查两件事：
 #   1) 工作区 vs git 远端逐文件 sha（看有没有漏推）
-#   2) Release 附件新鲜度 —— module/ 改了但没重打 zip / 没覆盖附件，
-#      只有这一项能发现（实测就这么漏过一次：附件 17306 字节，重打的已 17419）
+#   2) Release 附件新鲜度 —— 下载 Release 附件，把它里面的文件与本地 module/
+#      逐个比 sha256。module/ 改了但忘了重发附件，只有这一项能发现
+#      （实测就这么漏过一次：附件还是 17306 字节，重打的已经 17419）。
+#      为什么比内容不比 zip 字节：zip 的条目顺序随文件系统 readdir 变，
+#      实测同一份 module/ 在仓库里和复制到 /tmp 后打出的 zip sha256 不同。
 #
-# 依赖：gh（已登录）、python3、git、sha256sum
+# 依赖：gh（已登录）、python3、git、curl
 # 可用环境变量覆盖：GH / REPO / BRANCH
 # 退出码：0 全部一致；2 git 树不一致；3 Release 附件过期/取不到
 # ============================================================
@@ -116,46 +119,87 @@ PY
 TREE_RC=$?
 
 # ---------- Release 附件新鲜度 ----------
-# 为什么单独查这一项：上面只比「工作区 vs git 树」，而 module/ 改了之后
-# 忘记重打 zip、或忘记覆盖 Release 附件，git 树是完全看不出来的。
-# GitHub 的 release asset 带 digest 字段（sha256），并且 build_module_zip.sh
-# 对同一份内容产出可复现的 zip（实测两次构建 sha256 相同），所以能直接逐字节比。
+# 做法：从 api.github.com 下回 Release 附件（约 17 KB，实测 2-3 秒），
+# 把它里面的文件与本地 module/ 逐个比 sha256。
+# 不比对 zip 字节：zip 条目顺序随文件系统变，字节级比对会误报。
 REL_RC=0
 echo
 echo "=== Release 附件新鲜度 ==="
-if [ ! -f "$ROOT/tools/build_module_zip.sh" ]; then
-    echo "  跳过：找不到 tools/build_module_zip.sh"
+PROP="$ROOT/module/module.prop"
+if [ ! -f "$PROP" ]; then
+    echo "  跳过：找不到 module/module.prop"
 else
-    # 先清掉旧产物，免得把上一次的 zip 当成这次的
-    rm -f "$ROOT"/_dist/qiyuntai_btpanel-*.zip 2>/dev/null
-    sh "$ROOT/tools/build_module_zip.sh" >/tmp/qyt_build_zip.log 2>&1
-    ZIP=$(ls -t "$ROOT"/_dist/qiyuntai_btpanel-*.zip 2>/dev/null | head -1)
-    if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
-        echo "  !! 重打 zip 失败（看 /tmp/qyt_build_zip.log）"
+    # module.prop 里 version 自带 v（version=v1.2.3），所以 tag 就是它本身，
+    # 附件名是 qiyuntai_btpanel-<version>.zip。别再补一个 v（实测踩过，
+    # 会拼出 qiyuntai_btpanel-vv1.2.3.zip 这种不存在的名字）。
+    TAG=$(sed -n 's/^version=//p' "$PROP" | tr -d '\r' | head -1)
+    ASSET="qiyuntai_btpanel-$TAG.zip"
+    AID=$("$GH" api "repos/$REPO/releases/tags/$TAG" \
+        --jq ".assets[] | select(.name==\"$ASSET\") | .id" 2>/dev/null | tr -d '\r' | head -1)
+    if [ -z "$AID" ]; then
+        echo "  ?? Release $TAG 里没有附件 $ASSET，或者 tag/assets 取不到"
         REL_RC=3
     else
-        # 附件名就是 zip 文件名，tag 由它去掉前缀和 .zip 反推。
-        # 注意：module.prop 里 version 本身就带 v（version=v1.2.3），
-        # 所以不能写成 "v$version"，否则会拼出 qiyuntai_btpanel-vv1.2.3.zip
-        # 这种不存在的名字，检查会误报「重打失败」（实测踩过）。
-        ASSET=$(basename "$ZIP")
-        TAG=${ASSET#qiyuntai_btpanel-}
-        TAG=${TAG%.zip}
-        LOCAL_SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
-        REMOTE_SHA=$("$GH" api "repos/$REPO/releases/tags/$TAG" \
-            --jq ".assets[] | select(.name==\"$ASSET\") | .digest" 2>/dev/null \
-            | sed 's/^sha256://' | tr -d '\r' | head -1)
-        if [ -z "$REMOTE_SHA" ]; then
-            echo "  ?? Release $TAG 里没有附件 $ASSET（或取不到 digest）"
+        TOK=$("$GH" auth token 2>/dev/null | tr -d '\r\n')
+        rm -f /tmp/qyt_asset.zip
+        CODE=$(curl -sSL -m 60 -H "Authorization: token $TOK" \
+            -H "Accept: application/octet-stream" -o /tmp/qyt_asset.zip \
+            -w '%{http_code}' \
+            "https://api.github.com/repos/$REPO/releases/assets/$AID" 2>/dev/null)
+        if [ "$CODE" != "200" ] || [ ! -s /tmp/qyt_asset.zip ]; then
+            echo "  ?? 下载附件失败（HTTP $CODE）"
             REL_RC=3
-        elif [ "$LOCAL_SHA" = "$REMOTE_SHA" ]; then
-            echo "  一致：$ASSET  sha256=${LOCAL_SHA:0:16}…"
         else
-            echo "  !! Release 附件过期：$ASSET"
-            echo "     本地重打的 zip : $LOCAL_SHA"
-            echo "     Release 上的   : $REMOTE_SHA"
-            echo "     修：gh release upload $TAG \"$ZIP\" -R $REPO --clobber"
-            REL_RC=3
+            python3 - "$ROOT/module" /tmp/qyt_asset.zip "$ASSET" <<'PY'
+import hashlib, os, sys, zipfile
+
+moddir, zpath, asset = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def sha256(b):
+    return hashlib.sha256(b).hexdigest()
+
+local = {}
+for name in sorted(os.listdir(moddir)):
+    p = os.path.join(moddir, name)
+    if os.path.isfile(p):
+        with open(p, 'rb') as f:
+            local[name] = sha256(f.read())
+
+with zipfile.ZipFile(zpath) as z:
+    remote = {}
+    for info in z.infolist():
+        if info.is_dir():
+            continue
+        n = info.filename
+        if n.startswith('module/'):
+            n = n[len('module/'):]
+        remote[n] = sha256(z.read(info))
+
+missing = sorted(set(local) - set(remote))
+extra   = sorted(set(remote) - set(local))
+diff    = sorted(n for n in set(local) & set(remote) if local[n] != remote[n])
+
+print("  附件 %s 里有 %d 个文件，本地 module/ 有 %d 个" % (asset, len(remote), len(local)))
+if not missing and not extra and not diff:
+    print("  一致：附件内容与本地 module/ 逐文件相同")
+    sys.exit(0)
+
+print("  !! Release 附件与本地 module/ 不一致：")
+for n in missing:
+    print("     附件里缺：%s（本地有）" % n)
+for n in extra:
+    print("     附件里多：%s（本地没有）" % n)
+for n in diff:
+    print("     内容不同：%-16s 本地 %s / 附件 %s" % (n, local[n][:12], remote[n][:12]))
+print("     修：重打 zip 后覆盖附件")
+print("         sh tools/build_module_zip.sh && gh release upload %s _dist/%s -R %s --clobber"
+      % (asset.split('qiyuntai_btpanel-')[1][:-4] if 'qiyuntai_btpanel-' in asset else 'TAG',
+         asset, os.environ.get('REPO', 'moliapiyyds/qiyuntai-btpanel')))
+sys.exit(3)
+PY
+            PY_RC=$?
+            [ "$PY_RC" = "3" ] && REL_RC=3
+            rm -f /tmp/qyt_asset.zip
         fi
     fi
 fi
