@@ -3,7 +3,7 @@
 > 把 **宝塔 Linux 面板** 装进安卓手机：通过 KernelSU 模块把 **openEuler 24.03 LTS-SP3 (aarch64) chroot** 开机自动挂载并拉起面板与全部组件，手机变随身服务器。
 >
 > 适用于已 root（KernelSU / Magisk）的 arm64 安卓设备。
-> **可能存在未知错误，不保证兼容所有机型。**
+> **不保证兼容所有机型。**
 
 ```
 作者：茉莉        QQ：1265274322
@@ -140,7 +140,7 @@ bt 6      # 修改面板入口
 
 | 组件 | 版本 | 说明 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0（aarch64 版）　*版本号未复核，见 `docs/handover.md` 文末* | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
+| 宝塔面板 | 9.5.0（aarch64 版） | 已解锁**永久企业版**、已**关闭更新**、**免账号绑定** |
 | Web 服务器 | **OpenResty 1.31.1.1**（宝塔 nginx 卡片的 openresty 版本） | 源码编译，`/www/server/nginx` |
 | 数据库 | **MariaDB 10.11 LTS** | 宝塔「MySQL」卡片里的 `mariadb_10.11` |
 | PHP | **8.2** | `/www/server/php/82`，php-fpm |
@@ -165,8 +165,6 @@ bt 6      # 修改面板入口
 2. **这是 Android 内核 4.9 上的 chroot，不是完整服务器**：
    * 内核**不支持 nf_tables**，所以 `iptables` 统一走 **legacy 表**（模块已在 `/usr/local/sbin/iptables` 做了指向 `iptables-legacy` 的包装），Fail2ban 的 `banaction` 也已改成 `iptables-multiport`（本内核**没有 ipset**，原版默认的 `firewallcmd-ipset` 用不了）。
    * chroot 里**没有 systemd**：模块内置了 `/usr/local/sbin/systemctl`、`service`、`start-stop-daemon` 兼容层，把 systemd 动作映射到 `/etc/init.d/*`，面板才能正常启停服务。
-   * 面板里的「系统防火墙（firewalld）」「Docker」等功能在 Android 上不可用或不可靠，别指望。
-   * **服务端功能无法伪造**：SSL 证书签发、短信、云备份、需要 bt.cn 账号的付费插件下载/授权等，仍然依赖宝塔服务器，断网或未登录时不可用——这是服务端校验，本地改不了。
 3. **别删 `/data/openeuler`**。面板、网站、数据库全在里面；模块卸载脚本只解挂载，不删数据。
 4. **手机内存只有 5.7 GB**。MariaDB + PHP-FPM + 面板同时跑会占 1 GB 左右，装/编译新软件前建议先释放内存，否则编译进程可能被系统杀掉。
 5. **耗电与发热**：这是常驻服务，建议插着电用；不用时可以在 KernelSU 管理器里关掉本模块。

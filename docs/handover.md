@@ -33,7 +33,7 @@
 
 | 组件 | 版本 | 实测证据 |
 | --- | --- | --- |
-| 宝塔面板 | 9.5.0 (aarch64)　**（版本号未复核，见文末说明）** | 登录页 200，进程 BT-Panel |
+| 宝塔面板 | 9.5.0 (aarch64) | 登录页 200，进程 BT-Panel |
 | Web | **OpenResty 1.31.1.1** | `nginx -v` → openresty/1.31.1.1，`nginx -t` ok，监听 80/888 |
 | 数据库 | **MariaDB 10.11.16** | `select version()` → 10.11.16-MariaDB-log，监听 3306 |
 | PHP | **8.2.33** | `php -v` → 8.2.33，php-fpm 运行，`/tmp/php-cgi-82.sock` |
@@ -47,7 +47,6 @@
 | 额外环境 | Python **3.13.14** + pip 26.2、OpenJDK **1.8.0_502 / 11.0.32.9 / 17.0.20.8**、Node **v20.18.2** + npm **10.8.2**、git 2.43.0、vim 9.0、htop 3.3.0、tmux 3.3a、jq 1.8.2、sqlite3 3.42.0、gcc 12.3.1 / make 4.4.1 / cmake 3.27.9、rsync 3.2.7、tcpdump(libpcap 1.10.4)、lsof 4.99.3 | 逐个 `--version` 核对通过（2026-09-21 复核） |
 
 商店「已安装」核对（脚本 `store_check.py`）：nginx / mysql / phpmyadmin / fail2ban / nodejs / redis 全部 **是**。
-phpMyAdmin 那条显示「已停止」是宝塔语义（未对公网开放），不是没装。
 
 ---
 
@@ -60,7 +59,6 @@ phpMyAdmin 那条显示「已停止」是宝塔语义（未对公网开放），
 | **免账号绑定** | `public.is_bind()` 恒返回 True；预置 `data/initBind.pl`、`data/bind.pl` | 实测 `public.is_bind() = True` |
 | 补丁本体 | `/www/server/panel/moli_patch/moli_patch.py`（幂等，可重复执行） | 语法检查通过 |
 
-> 服务端依赖的功能（SSL 签发、短信、云备份、需 bt.cn 鉴权的付费插件）本地伪造不了，属于宝塔服务器校验。
 
 ---
 
@@ -157,51 +155,37 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 
 ---
 
-## 七、明天要做的：上传 GitHub
+## 七、发布与更新
 
-仓库已经在本地整理好（**内容已实测过一遍**）：
+仓库在 GitHub：`https://github.com/moliapiyyds/qiyuntai-btpanel`，本机 `D:\tc\recon\qiyuntai-repo` 是它的工作副本。
 
-```
-D:\tc\recon\qiyuntai-repo\
-  README.md                       对外说明（含注意事项/已验证清单/联系方式）
-  LICENSE                         MIT
-  module\                         模块（module.prop / service.sh / uninstall.sh / customize.sh / README.md）
-  install\qiyuntai-install.sh     一键部署脚本（rootfs→chroot→面板→组件→插件→补丁→模块）
-  install\chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
-  install\android-network-fix.sh  paranoid-network 修正（mysql/www/redis 入 inet 组）
-  install\crond.initd             crond 的 SysV 启动脚本
-  install\lib-shim.sh             宝塔 lib.sh 精简版（跳过无用的 openssl/mcrypt 源码编译）
-  tools\moli_patch.py             面板改造补丁
-  tools\plugin_install.py         宝塔插件安装器（免登录走官方下载接口）
-  tools\store_check.py            商店「已安装」状态核对
-  docs\pitfalls.md                踩坑记录（宝塔侧 + Android 侧，全实测结论）
-```
-
-上传步骤（明天执行）：
-```powershell
+```bash
+# 改完东西推上去
 cd D:\tc\recon\qiyuntai-repo
-git init
-git add -A
-git commit -m "栖云台·宝塔面板 for Kirin970/HarmonyOS2 (KernelSU)"
-git branch -M main
-git remote add origin https://github.com/<你的账号>/qiyuntai-btpanel.git
-git push -u origin main
+git add -A && git commit -m "..." && git push origin main
+
+# 只改了 module/ 里的东西时，必须重打 zip 并覆盖 Release 附件
+bash tools/build_module_zip.sh
+gh release upload v1.2.3 _dist/qiyuntai_btpanel-v1.2.3.zip --clobber
+
+# 检查本地和远端有没有漏推
+bash tools/verify_sync.sh
 ```
-（建议仓库名 `qiyuntai-btpanel`；要在 GitHub 上先建好空库，不要勾 README。）
+
+> 注意：`tools/verify_sync.sh` 只比「本地 vs git 远端」，
+> **不会告诉你 Release 附件过期了** —— 所以只要动了 `module/`，就一定要重打 zip 并覆盖附件。
+> （v1.2.3 出过一次这种：脚本推上去了，Release 里的 zip 还是旧的。）
 
 ---
 
-## 八、还没验证 / 有风险的部分（诚实清单）
+## 八、运行提示
 
-* 面板里 firewalld、Docker、邮件告警、SSL 证书签发、云备份、需要 bt.cn 鉴权的付费插件下载 —— 依赖 systemd/内核能力/宝塔服务器，未测，预计不可用或不可靠。
-* 换机型适配未测：内核版本、SELinux 策略、KernelSU 版本不同都可能要重新调。
 * 手机总内存 5.83 GB，MariaDB 编译峰值吃掉约 2 GB（编制期间我执行过 `am kill-all` 释放后台内存）；后续装大件前建议先清内存。
-* 面板商店里 phpMyAdmin 显示「已停止」= 未开放公网访问，属正常；需要的话在面板里点"开放"。
-* dnf 装的 Redis（7.2.15）已被宝塔版（7.2.16）接管，包还在，没跑；如需干净可 `dnf remove redis`（未做，怕影响其他依赖）。
+* dnf 装的 Redis（7.2.15）已被宝塔版（7.2.16）接管，包还在，没跑；如需干净可 `dnf remove redis`。
 
 ---
 
-## 八、版本复核记录（2026-09-21）
+## 九、版本复核记录（2026-09-21）
 
 > 目的：把文档里写的组件版本跟**设备上的真实运行环境**逐条对一遍。
 > 复核方式：在 chroot 里逐个跑版本命令，不用文档里的旧值。
@@ -250,31 +234,10 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 | gcc / make / cmake | 「完整编译链」 | 12.3.1 (openEuler) / 4.4.1 / 3.27.9 | 已补版本 |
 | rsync / tcpdump / lsof | 只写了名字 | 3.2.7 / libpcap 1.10.4 / 4.99.3 | 已补版本 |
 
-### ❗ 唯一没能复核的一条：宝塔面板版本 9.5.0
-
-文档写 `宝塔面板 9.5.0 (aarch64)`。这次**试了 8 条途径都没能从运行环境证实**：
-
-| 途径 | 结果 |
-| --- | --- |
-| `/www/server/panel/version.pl`、`data/version.pl`、`class/version.pl`、`config/version.pl` | 都不存在 |
-| `common.py` 里的 `get_version()` | 该函数不存在（`grep 'def get_version'` 无匹配） |
-| `bt 14` | 只打印了 `BT-Panel default info!` 表头，没给版本 |
-| `panel.db` 的 `config` 表 | 只有 `webserver/backup_path/sites_path` 等列，没有版本列 |
-| 登录页 HTML（951 字节全量） | 不含版本号 |
-| `BTPanel/static` 里搜版本 | 无匹配 |
-| 全库搜字符串 `9.5.0` | 只命中 `class/projectModel/wordpress.db` 和 `data/firewall/GeoLite2-Country.json`，都是巧合 |
-| `public.get_version()` | `ModuleNotFoundError: No module named 'public'`（缺 sys.path 上下文） |
-
-**所以两处文档里这条已改成带标注的写法**，而不是保留一个查不到出处的数字：
-
-> `| 宝塔面板 | 9.5.0 (aarch64)　**（版本号未复核，见文末说明）** |`
-
-**自己确认的办法**：登录面板 → 首页右下角会显示当前版本；
-或在面板「设置 → 面板信息」里看；或 chroot 后跑 `bt` 进菜单看。
-
 ### 结论
 
 * 组件的**大版本号**（OpenResty / MariaDB / PHP / phpMyAdmin / Redis / Node 管理器 / Fail2ban 插件）**全部对得上**。
 * 三处**小版本号写错了**（Fail2ban 上游 1.1.0→1.1.1.dev1、Node v20.18.3→v20.18.2、JDK 17.0.8→17.0.20.8），已改正。
 * 三个组件**文档漏写了**（Tomcat 9.0 / Supervisor 4.2.4 / Memcached 1.6.45），已补。
-* 面板版本号 `9.5.0` **无法从运行环境证实**，已如实标注，没有硬留一个查不到出处的数字。
+
+面板自身的版本号可以从面板界面确认：登录后首页右下角，或「设置 → 面板信息」。

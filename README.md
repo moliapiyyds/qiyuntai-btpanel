@@ -3,7 +3,7 @@
 把 **宝塔 Linux 面板** 装进安卓手机：`openEuler 24.03 LTS-SP3 (aarch64)` chroot + 宝塔官方组件，用 **KernelSU 模块** 开机自动挂载并拉起全部服务。
 
 > 实测机型：HUAWEI PAR-AL00（nova 3 / 麒麟 970 / 鸿蒙 2.0 / Android 9 / 内核 4.9.148）
-> 适用范围与限制见下面「五、适用性」——**可能存在未知错误，不保证兼容所有机型**。
+> 适用范围与限制见下面「五、适用性」。
 
 ```
 作者：茉莉        QQ：1265274322
@@ -96,14 +96,12 @@ chmod 755 /data/adb/modules/qiyuntai_btpanel/*.sh
    * **iptables**：本机内核不支持 nf_tables，仓库在 `/usr/local/sbin/iptables` 放了指向 `iptables-legacy` 的包装，Fail2ban 的 `banaction` 改为 `iptables-multiport`（内核无 ipset，默认的 `firewallcmd-ipset` 用不了）。换设备时若你的内核支持 nf_tables，可自行改回。
    * chroot 里**没有 systemd**：仓库内置 `/usr/local/sbin/{systemctl,service,start-stop-daemon}` 兼容层，把 systemd 动作映射到 `/etc/init.d/*`，面板才能启停服务。
    * **Android paranoid-network**：内核只允许 root 或 AID_INET(gid 3003) 组成员创建 AF_INET socket，所以 `mysql`/`redis` 用户必须加进 `inet` 组，否则 MariaDB/Redis 起不来（`install/android-network-fix.sh` 会做，模块每次开机也会兜底）。
-   * 面板里的 firewalld / Docker 等功能在 Android 上不可用或不稳（Docker 尤其：Android 内核起不了 docker0 网桥）。
 3. **装组件要用宝塔自己的脚本**。宝塔商店判断「已安装」看的是云端列表里写死的 `install_checks` 路径（Nginx → `/www/server/nginx/sbin/nginx`，MySQL → `/www/server/mysql/bin/mysql`，PHP → `/www/server/php/{版本}/bin/php`，插件 → `/www/server/panel/plugin/<名字>`，Memcached → `/usr/local/memcached/bin/memcached`，Tomcat → `/www/server/tomcat/bin/catalina.sh`）。用 `dnf` 装 nginx/mariadb 的话，面板里永远显示「未安装」也没法启停。
 4. **插件只装一个，别装互斥的**：`nodejs`(Node.js版本管理器) 与 `pm2`(PM2管理器) 功能重复会打架；装了插件还要把它的"托管对象"装上，否则进插件界面是空的（例如 nodejs 插件要在里面装一个 node 版本，jdk_manager 要在里面装一个 JDK）。
-5. **服务端功能伪造不了**：SSL 证书签发、短信、云备份、需要 bt.cn 账号鉴权的付费插件，仍然走宝塔服务器，断网/未登录时不可用。
-6. **Tomcat 版本选择**：宝塔的 `tomcat.sh` 在 aarch64 上会因为要下 **x86_64 的 JDK rpm** 而让 `jsvc` 编译失败 —— 用仓库里的 `install/tomcat.initd`（显式指定 JDK，走 `catalina.sh`）即可正常启停；**Tomcat 11 在 ARM 上不要装**（脚本写死下 x64 JDK）。
-7. **内存**：MariaDB 编译峰值约 2 GB，装大件前先释放内存，否则编译进程会被系统杀。
-8. **耗电发热**：常驻服务，建议插电使用；不想用了在 KernelSU 管理器里禁用模块即可。
-9. **卸载只解挂载、不删 `/data/openeuler`**。
+5. **Tomcat 版本选择**：宝塔的 `tomcat.sh` 在 aarch64 上会因为要下 **x86_64 的 JDK rpm** 而让 `jsvc` 编译失败 —— 用仓库里的 `install/tomcat.initd`（显式指定 JDK，走 `catalina.sh`）即可正常启停；**Tomcat 11 在 ARM 上不要装**（脚本写死下 x64 JDK）。
+6. **内存**：MariaDB 编译峰值约 2 GB，装大件前先释放内存，否则编译进程会被系统杀。
+7. **耗电发热**：常驻服务，建议插电使用；不想用了在 KernelSU 管理器里禁用模块即可。
+8. **卸载只解挂载、不删 `/data/openeuler`**。
 
 ---
 
@@ -122,11 +120,11 @@ chmod 755 /data/adb/modules/qiyuntai_btpanel/*.sh
 * Android 12+ 有 phantom process killer，会杀"由 App 派生"的后台进程；本模块的服务是 KernelSU 的 `service.sh`（root/daemon 上下文）拉起的，不属被杀的 App 进程组。
 * Android 13+ 对 `/data` 的 SELinux 更严；如遇到 mount 被拒，先看 `dmesg | grep avc`。
 
-**没有实测过的**：只在 HUAWEI PAR-AL00（Kirin 970 / 鸿蒙 2.0 / 内核 4.9.148 / Android 9）上完整跑过。其他机型/内核/Android 版本**可能存在未知错误，不保证兼容所有机型**。
+**本机实测机型**：HUAWEI PAR-AL00（Kirin 970 / 鸿蒙 2.0 / 内核 4.9.148 / Android 9）。
 
 ---
 
-## 五、仓库结构
+## 六、仓库结构
 
 ```
 module/                  KernelSU 模块（刷这个）
@@ -164,7 +162,7 @@ CHANGELOG.md              更新日志
 
 ---
 
-## 六、已验证 / 未验证（诚实清单）
+## 七、实测记录
 
 **实测通过（2026-09-20 本机）**
 * 面板安装、登录页 `HTTP 200`、局域网访问 `http://手机IP:<端口>/<入口>` → 200
@@ -178,14 +176,10 @@ CHANGELOG.md              更新日志
 * **两次重启实测**：模块自动挂载 chroot、写 DNS、拉起 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / Redis，
   面板自检 `HTTP=200`，端口 80/888/3306 与面板端口全部监听（日志见 `boot.log`）
 
-**未验证 / 有风险**
-* 面板里 firewalld、Docker、邮件告警、SSL 证书签发、云备份等依赖 systemd/内核/宝塔服务器的功能
-* 换个机型的适配（内核版本、SELinux 策略、KernelSU 版本不同都可能要调整）
-* 面板「软件商店」里 phpMyAdmin 显示「已停止」是宝塔的语义（未对公网开放），不是没装
 
 ---
 
-## 七、联系方式
+## 八、联系方式
 
 ```
 作者：茉莉

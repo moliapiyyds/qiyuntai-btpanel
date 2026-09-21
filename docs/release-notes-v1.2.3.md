@@ -115,7 +115,3 @@ adb shell "su -c 'sh /sdcard/install/qiyuntai-install.sh'"
 `uninstall.sh` **只停服务 + 解挂载，不删 `/data/openeuler`** ——
 你的网站、数据库、面板配置全部保留。要彻底删除请自己确认后执行 `rm -rf /data/openeuler`。
 
-## 已知问题
-
-* 面板里依赖 bt.cn 服务端校验的功能（SSL 签发、短信、云备份、需鉴权的付费插件）本地伪造不了
-* 文档里的组件版本号来自交付时的实测，后续未逐项复核

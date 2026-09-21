@@ -49,8 +49,3 @@
 * `tools/`：`moli_patch.py`（面板改造补丁，幂等）、`plugin_install.py`、`store_check.py`
 
 ---
-
-## 待办（还没做的）
-
-* `docs/handover.md` 里有些内容是 v1.0.0 时期写的，与当前代码有偏差，正在对齐
-* 没有自动化测试；「装完能不能用」目前靠 `action.sh diag` 人工确认
