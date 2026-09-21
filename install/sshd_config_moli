@@ -1,0 +1,17 @@
+Port 22
+AddressFamily any
+ListenAddress 0.0.0.0
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+PermitRootLogin yes
+PubkeyAuthentication yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+UsePAM no
+UseDNS no
+PrintMotd no
+PidFile /run/sshd.pid
+AuthorizedKeysFile .ssh/authorized_keys
+AllowTcpForwarding yes
+X11Forwarding no
+LogLevel INFO

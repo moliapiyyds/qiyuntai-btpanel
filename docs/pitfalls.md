@@ -174,6 +174,18 @@ ipset v7.19: Kernel error received: Invalid argument
   **注意**：只把 `.initd` 放进仓库是不生效的 —— 在接上 `step_patch` 之前，
   `crond.initd` / `tomcat.initd` 就在仓库里躺了很久，但没有任何脚本引用它们。
 
+### 7. 同一类问题还有 sshd（不是 init 脚本，是「配置 + 软件包」）
+`module/service.sh` 第 4.7 段用 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
+但既没有脚本装 `openssh-server`，也没有脚本写这个配置文件 —— 缺了就走到
+「未找到 … 跳过 sshd」，adb 不通时唯一的救命通道就没了。
+基线里它是活的（`netstat` 有 `0.0.0.0:22`，`pkglist_pre.txt` 有 `openssh-server-9.6p1-21`），
+说明同样是当年手工装的。现在由 `install/sshd_config_moli`（从备份 tarball 里原样取出，
+365 字节 sha256 `951da0fb…`）+ `step_deps` 里的 `openssh-server` 补齐。
+
+**教训（这条比坑本身重要）**：验证「环境装全了没有」不能只读代码 ——
+拿「基线 rpm 包列表 / 基线 init.d 列表 / 基线 netstat 端口」三样东西反向对账，
+才查得出「文档承诺了、脚本从没做过」的东西。
+
 ---
 
 ## 三、MariaDB 起不来？两个 Android 特有的坑（都踩过）

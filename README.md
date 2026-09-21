@@ -292,15 +292,17 @@ module/                  KernelSU 模块（刷这个）
 install/                 设备上执行的部署脚本
   deploy.sh               一键部署总入口（--check / --repo-only / --no-reboot）
   prepare-rootfs.sh       铺 openEuler rootfs（按 manifest.json 顺序叠层）
-  qiyuntai-install.sh     一键装：rootfs → 挂载 → 面板 → 组件 → 补丁 → 模块
+  qiyuntai-install.sh     一键装：rootfs → 挂载 → 依赖 → 面板 → 凭据 → 组件 → 插件 → 基线包对齐 → 补丁 → 模块
   chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
   android-network-fix.sh  paranoid-network 的 inet 组修正
   crond.initd             chroot 没有 systemd、宝塔也不给这三个，缺了就起不来
   tomcat.initd           （install/qiyuntai-install.sh 的 patch 步骤会装进 /etc/init.d）
   memcached.initd
+  sshd_config_moli        sshd 兜底通道（:22）的配置，面板/openEuler 都不带，基线里那台是手工装的
   lib-shim.sh            替换面板原版 lib.sh 的最小依赖兜底（避免重复编译 openssl/mcrypt）
   bt-panel-install.exp   驱动宝塔官方安装器：分配 pty、按「提示内容」作答（不依赖提问顺序）
   installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单
+  baseline-packages.txt  标准环境的 548 个 rpm 包清单（parity 步骤按它对齐，只比包名）
 
 tools/                   辅助脚本
   moli_patch.py           面板改造补丁（永久企业版 / 关闭更新 / 免绑定），幂等

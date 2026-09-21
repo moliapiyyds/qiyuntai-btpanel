@@ -124,7 +124,7 @@ step_deps() {
       oniguruma oniguruma-devel libwebp libwebp-devel libvpx libvpx-devel libsodium libsodium-devel \
       glib2 glib2-devel libstdc++ libstdc++-devel perl perl-devel perl-Data-Dumper \
       vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel \
-      expect'
+      expect openssh-server openssh-clients'
     # 运行时组件（不是编译依赖）：宝塔的 redis / memcached 插件要用这两个二进制。
     # 单独一条、允许失败 —— 免得某个包名在别的 openEuler 版本里不存在，把上面
     # 那条大的 dnf 事务一起搞挂。
@@ -229,6 +229,14 @@ c.execute('update users set username=? where id=1', ('$NEWU',))
 c.commit()\"" || warn "改用户名失败（保持镜像里的），不影响其它"
         fi
         in_chroot '/etc/init.d/bt restart' >/dev/null 2>&1 || true
+        # sshd 主机密钥同样要重生成：镜像里烘的是打包那台的密钥，
+        # 同一个镜像刷多台设备就会共用同一份主机密钥。重启后 service.sh 会用新密钥拉起 sshd。
+        rm -f "$ROOT"/etc/ssh/ssh_host_*
+        if in_chroot 'ssh-keygen -A' >/dev/null 2>&1; then
+            log "已重新生成 sshd 主机密钥"
+        else
+            warn "ssh-keygen -A 失败（sshd 会没有主机密钥）"
+        fi
         log "已重新随机化：端口 $NP，安全入口 /$NEWP，用户名 ${NEWU:-未改}"
     fi
     U=$(in_chroot 'cd /www/server/panel && ./pyenv/bin/python3 -c "
@@ -351,6 +359,26 @@ step_patch() {
         fi
     done
 
+    # sshd：service.sh 第 4.7 段的「adb 不通时的救命通道」。
+    # 面板不带它、openEuler 基础镜像里也没有 —— 但基线里 `sshd` 是在跑的
+    # （netstat 有 0.0.0.0:22，进程名 sshd_config_mo…），说明 openssh-server 与这个
+    # 配置当年是手工装的，脚本同样没同步。缺了它 service.sh 只会打印「未找到 … 跳过 sshd」。
+    # 配置内容是从删除前的备份 tarball 里原样取出来的（sha256 951da0fb…，365 字节）。
+    if [ -f "$REPO_DIR/install/sshd_config_moli" ]; then
+        mkdir -p "$ROOT/etc/ssh"
+        cp -f "$REPO_DIR/install/sshd_config_moli" "$ROOT/etc/ssh/sshd_config_moli"
+        chmod 644 "$ROOT/etc/ssh/sshd_config_moli"
+        log "已装 sshd 配置：/etc/ssh/sshd_config_moli"
+    else
+        warn "缺 install/sshd_config_moli —— sshd 兜底通道不会起来"
+    fi
+    # 主机密钥：没生成过就现场生成（每台设备独立，不共用密钥）
+    if [ ! -f "$ROOT/etc/ssh/ssh_host_ed25519_key" ]; then
+        in_chroot 'ssh-keygen -A' >/dev/null 2>&1 \
+            && log "已生成 sshd 主机密钥（ssh-keygen -A）" \
+            || warn "ssh-keygen -A 失败（sshd 可能起不来）"
+    fi
+
     log "打面板改造补丁（永久企业版 / 关闭更新 / 免绑定）"
     cp -f "$REPO_DIR/tools/moli_patch.py" "$ROOT/tmp/moli_patch.py"
     in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/moli_patch.py'
@@ -361,7 +389,71 @@ step_patch() {
     in_chroot '/etc/init.d/bt restart' || true
 }
 
-# ---------------- 7) 模块 ----------------
+# ---------------- 7) 基线包对齐 ----------------
+# 为什么要有这一步：一键部署的目标是「跟标准环境一样」，而安装脚本是手写的，
+# 漏装是常态 —— 本轮实测就漏了 openssh-server（sshd 兜底通道没了）、
+# java-*-openjdk（jdk_manager 要用）、jq / htop / bind-utils / libpcap 等基线里有的。
+# 靠读脚本永远查不全，靠数据能查全：仓库里带一份基线包清单
+# install/baseline-packages.txt（548 条，来自删除前那台的 rpm -qa），
+# **按包名**比对（版本会被软件源往前推，实测 glibc/libxml2/util-linux 等二十来个名字
+# 相同但版本号不同，所以只能比名字），把缺的装上，最后报告哪些名字当前源里已经没有。
+step_parity() {
+    local BASE="$REPO_DIR/install/baseline-packages.txt"
+    if [ ! -f "$BASE" ]; then
+        warn "没有 install/baseline-packages.txt，跳过基线包对齐"
+        return 0
+    fi
+    log "按基线包清单对齐（只比包名，不比版本）"
+    cp -f "$BASE" "$ROOT/tmp/baseline-packages.txt"
+    # 用脚本而不是拼一行命令：里面全是引号和 $( )，走 in_chroot 的双引号会被吃
+    cat > "$ROOT/tmp/parity.sh" <<'EOS'
+#!/bin/bash
+# 基线 <NEVRA> 去掉「版本-发布.架构」两段就是包名（rpm 的版本/发布里不允许出现 -）
+sed -n 's/^\(.*\)-[^-]*-[^-]*\.\(aarch64\|noarch\|x86_64\)$/\1/p' \
+    /tmp/baseline-packages.txt | sort -u > /tmp/want.txt
+rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u > /tmp/have.txt
+comm -23 /tmp/want.txt /tmp/have.txt > /tmp/missing.txt
+echo "基线包名 $(wc -l < /tmp/want.txt) 个 / 已在位 $(comm -12 /tmp/want.txt /tmp/have.txt | wc -l) 个 / 缺 $(wc -l < /tmp/missing.txt) 个"
+EOS
+    in_chroot 'bash /tmp/parity.sh'
+
+    local n
+    n=$(in_chroot 'wc -l < /tmp/missing.txt' | tail -1 | tr -d '\r ')
+    n=${n:-0}
+    if [ "$n" = "0" ]; then
+        log "基线包全部在位"
+        return 0
+    fi
+
+    log "缺 $n 个，一次装（--skip-broken，失败不算致命）"
+    in_chroot 'dnf install --skip-broken --setopt=install_weak_deps=False -y $(cat /tmp/missing.txt)' \
+        || warn "批量补装没完全成功，下面逐个再试"
+    in_chroot 'bash /tmp/parity.sh'
+
+    n=$(in_chroot 'wc -l < /tmp/missing.txt' | tail -1 | tr -d '\r ')
+    n=${n:-0}
+    if [ "$n" != "0" ]; then
+        # 逐个兜底：一个包在当前源里不存在会让整条 dnf 事务失败，所以必须拆开
+        log "还剩 $n 个，逐个装（每个都允许失败）"
+        in_chroot 'for p in $(cat /tmp/missing.txt); do
+            rpm -q "$p" >/dev/null 2>&1 && continue
+            dnf install --skip-broken --setopt=install_weak_deps=False -y "$p" >/dev/null 2>&1 \
+                || echo "  装不上（当前源里没有或依赖不满足）：$p"
+        done'
+        in_chroot 'bash /tmp/parity.sh'
+    fi
+
+    # 这一项不 fail：源里确实可能已经没有某个包，把差额如实打出来比假装成功强
+    local left
+    left=$(in_chroot 'cat /tmp/missing.txt' | tr -d '\r' | tr '\n' ' ')
+    if [ -n "$(printf '%s' "$left" | tr -d ' ')" ]; then
+        warn "仍与基线有差额（当前软件源提供不了）：$left"
+    else
+        log "已与基线包清单对齐"
+    fi
+}
+
+# ---------------- 8) 模块 ----------------
 step_module() {
     log "安装 KernelSU 模块"
     local D=/data/adb/modules/qiyuntai_btpanel
@@ -374,7 +466,7 @@ step_module() {
 
 need_root
 case "$STEP" in
-    all)        step_rootfs; step_mount; step_deps; step_panel; step_credentials; step_components; step_plugins; step_patch; step_module ;;
+    all)        step_rootfs; step_mount; step_deps; step_panel; step_credentials; step_components; step_plugins; step_parity; step_patch; step_module ;;
     rootfs)     step_rootfs ;;
     mount)      step_mount ;;
     deps)       step_mount; step_deps ;;
@@ -382,9 +474,10 @@ case "$STEP" in
     creds)      step_mount; step_credentials ;;
     components) step_mount; step_components ;;
     plugins)    step_mount; step_plugins ;;
+    parity)     step_mount; step_parity ;;
     patch)      step_mount; step_patch ;;
     module)     step_module ;;
-    *)          echo "用法: sh $0 [all|rootfs|mount|deps|panel|creds|components|plugins|patch|module]"; exit 1 ;;
+    *)          echo "用法: sh $0 [all|rootfs|mount|deps|panel|creds|components|plugins|parity|patch|module]"; exit 1 ;;
 esac
 log "完成。面板地址：http://127.0.0.1:$(cat $ROOT/www/server/panel/data/port.pl 2>/dev/null)$(cat $ROOT/www/server/panel/data/admin_path.pl 2>/dev/null)"
 log "登录账号密码见：$ROOT/root/qiyuntai-panel-info.txt（或点模块「操作」按钮）"

@@ -33,6 +33,20 @@
   （openEuler 的 memcached 包只带 systemd 单元，chroot 里没有 systemd；宝塔那 9 个插件
   里也没有 memcached 插件），一并纳入 `step_patch` 的安装清单。
 
+### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
+
+* `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
+  文档也写着它，但**没有任何脚本装 `openssh-server`，也没有任何脚本写这个配置文件**。
+  实测：`step_deps` 的 dnf 清单里根本没有 openssh 相关的包。
+* 基线（删除前那台）确认是活的：`netstat` 有 `0.0.0.0:22  LISTEN  …/sshd_config_mo`，
+  `pkglist_pre.txt` 里有 `openssh-server-9.6p1-21.oe2403sp3`。也就是说它当年是手工装的。
+* 现在：`step_deps` 加 `openssh-server openssh-clients`，`step_patch` 把
+  `install/sshd_config_moli` 装到 `/etc/ssh/`，并在缺主机密钥时跑一次 `ssh-keygen -A`。
+  配置文件内容是从删除前的备份 tarball 里原样取出来的 —— 365 字节，
+  sha256 `951da0fbe8f7e6101582d61fd2778a4094fd4c536e6adf4e81fa992bd2e064d7`，与备份逐字节一致。
+* 顺带：`--from-image` 的时候会**重新生成主机密钥**（`rm -f /etc/ssh/ssh_host_*` + `ssh-keygen -A`），
+  否则同一个镜像刷多台设备会共用同一份主机密钥。
+
 ---
 
 ## v1.2.4 — 2026-09-21
