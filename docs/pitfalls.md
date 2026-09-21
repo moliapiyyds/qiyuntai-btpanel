@@ -551,3 +551,39 @@ sshd 明明在跑（`ps` 看得到、`:22` 在听），它却返回空。差点�
 要么用 `-x`，要么拿到 pid 后再滤掉 cmdline 里带 `pgrep` 的。
 
 **教训**：工具链对不上时先怀疑工具，再怀疑结论 —— 写进 `tools/audit_env.sh` 的注释里了。
+
+### 6. `/sdcard` 是 CE 存储：手机重启后没解锁一次就「消失」了（2026-09-22 实测）
+
+现象：部署跑完自动重启之后，看门狗的 `-PushOnly` 全灭 ——
+
+```
+adb push … /sdcard/install/        → 失败
+sh /sdcard/install/qiyuntai-install.sh → No such file or directory
+```
+
+一查：`/sdcard -> /storage/self/primary -> /mnt/user/0/primary`，而 **`/mnt/user/0/` 是空的**
+（vold 没建 `primary`）。再去看 `/data/media/0`，61 个条目里 **53 个是 22 字符的乱码名**
+（`+ElDgA0OjWrv4YoKW5GCzA` 这种），只有 8 个还是明文（`LSPosed-….zip` 之类）。第一眼像
+「内部存储坏了、用户照片没了」——实际不是：
+
+* `ro.crypto.state=encrypted`、`ro.crypto.type=file` → 这是 **FBE（文件级加密）**
+* 那些 22 字符的名字是 **fscrypt 的加密文件名**（字母表 `[A-Za-z0-9+,]`，16 字节密文编成 22 字符）
+* 用户 0 的 **CE 存储没解锁**（手机停在锁屏）→ 内核拿不到 key → 只能看到加密名，
+  `/sdcard` 也不挂；`/data` 上的 **DE 存储**（`/data/local/tmp`、`/data/openeuler`）照常可用
+
+**为什么这个坑必踩**：一键部署的最后一步就是 `reboot`。重启后手机停在锁屏，
+于是「装完再推一次」这类操作（比如我的看门狗第 B 步）必然失败。
+
+**修法**：把所有推送/执行路径从 `/sdcard` 换到 **`/data/local/tmp`**
+（`deploy.ps1` 默认推 `/data/local/tmp/qyt-repo`，`-Dest` 可改）。
+`install/deploy.sh` 与 `install/qiyuntai-install.sh` 内部用的是「自身路径的上一级」，
+所以放哪个目录都能跑；镜像目录同理（推荐 `/data/local/tmp/qyt_image`）。
+用户想用 `/sdcard` 也行 —— **先解锁手机一次**（点亮屏幕、输密码/图案进去）就好。
+
+**判断方法**（下次遇到"存储好像坏了"先看这三样）：
+```sh
+ls /mnt/user/0/            # 空 = 还没解锁
+ls /data/media/0 | head    # 22 字符乱码名 = fscrypt 加密名，不是损坏
+getprop ro.crypto.state    # encrypted
+```
+

@@ -1,18 +1,32 @@
 #!/bin/sh
-# 茉莉定制：Tomcat 的 SysV 启动脚本（宝塔的 tomcat.sh 只装文件，jsvc 在 aarch64 上编译失败，
-# 所以这里直接用 catalina.sh 启停，并显式指定能用的 JDK）
+# 茉莉定制：Tomcat 的 SysV 启动脚本
+# ------------------------------------------------------------
+# 为什么要自己写：宝塔这个版本的面板**没有 tomcat 的安装脚本**
+# （install/ 下只有 install_soft.sh / public.sh / nginx.sh / fix_install.sh / d_node.pl，
+#  class/tomcat.py 只管 vhost），tomcat2 插件的 install.sh 是个空壳（只 echo "安装完成"）。
+# 而宝塔原本那套 tomcat.sh 在 aarch64 上会因为去下 x86_64 的 JDK rpm 让 jsvc 编译失败，
+# 所以这里绕开 jsvc，直接调 catalina.sh 启停。
 # chkconfig: 2345 90 10
 # description: Apache Tomcat
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export JAVA_HOME=/www/server/java/jdk-17.0.8
 export CATALINA_HOME=/www/server/tomcat
 export CATALINA_BASE=/www/server/tomcat
-# JAVA_HOME 指向的 JDK 不可用时，回退到 /usr/bin/java 真实指向的那一层
-if [ ! -x "$JAVA_HOME/bin/java" ]; then
-    _j=$(readlink -f /usr/bin/java 2>/dev/null)
-    [ -n "$_j" ] && JAVA_HOME=$(dirname "$(dirname "$_j")")
-    export JAVA_HOME
-fi
+
+# JAVA_HOME：**按候选顺序找，不要写死一个路径**。
+# 原来写死 /www/server/java/jdk-17.0.8 —— 实测基线那台的目录叫
+# java-17-openjdk-17.0.20.8，写死的那个根本不存在，一直是靠下面的回退侥幸能用。
+# 顺序：宝塔自己装的 JDK → rpm 装的 OpenJDK → /usr/bin/java 反查。
+find_java_home() {
+    for d in /www/server/java/jdk-17* /www/server/java/jdk-11* /www/server/java/jdk* \
+             /usr/lib/jvm/java-17* /usr/lib/jvm/jre-17* \
+             /usr/lib/jvm/java-11* /usr/lib/jvm/java-1.8.0* /usr/lib/jvm/*; do
+        [ -x "$d/bin/java" ] && { echo "$d"; return 0; }
+    done
+    j=$(readlink -f /usr/bin/java 2>/dev/null)
+    [ -n "$j" ] && { dirname "$(dirname "$j")"; return 0; }
+    return 1
+}
+JAVA_HOME=$(find_java_home) && export JAVA_HOME
 CT=$CATALINA_HOME/bin/catalina.sh
 
 running() { pgrep -f 'catalina.base=/www/server/tomcat' >/dev/null 2>&1; }
@@ -20,6 +34,8 @@ running() { pgrep -f 'catalina.base=/www/server/tomcat' >/dev/null 2>&1; }
 case "$1" in
   start)
     if running; then echo "Tomcat 已在运行"; exit 0; fi
+    [ -x "$CT" ] || { echo "找不到 $CT（Tomcat 没铺到 /www/server/tomcat）"; exit 1; }
+    echo "用 JAVA_HOME=${JAVA_HOME:-未找到}"
     "$CT" start >/dev/null 2>&1
     sleep 5
     running && { echo "Tomcat 启动完成"; exit 0; } || { echo "Tomcat 启动失败"; exit 1; }

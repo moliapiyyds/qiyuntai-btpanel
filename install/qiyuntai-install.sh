@@ -351,6 +351,40 @@ step_plugins() {
     [ -z "$bad" ] || fail "这些插件没装上：$bad"
 
     step_memcached
+    step_tomcat
+}
+
+# tomcat：铺软件本体到 /www/server/tomcat
+#
+# 【为什么要自己铺】这个面板版本**没有 tomcat 的安装脚本**：
+#   install/ 下只有 install_soft.sh / public.sh / nginx.sh / fix_install.sh / d_node.pl，
+#   class/tomcat.py 只管 vhost，tomcat2 插件（Java项目管理器）的 install.sh 是个空壳
+#   （内容就是 `echo '安装完成' > /tmp/bt_install.pl`）。
+#   所以光装插件，/www/server/tomcat 是不存在的 —— 而模块开机要拉起 tomcat，
+#   面板商店判断它装没装也看 /www/server/tomcat/bin/catalina.sh。
+# 【版本】基线那台的 catalina.jar MANIFEST 是 Specification-Version: 9.0（9.0.62），
+#   实测 archive.apache.org 上 apache-tomcat-9.0.62.tar.gz 还在（HTTP 200），
+#   而 download.bt.cn 上那几个 tomcat 路径都是 404；dlcdn/tuna 只留最新版。
+#   所以直接从 Apache 归档取同一个版本，装出来的目录结构与宝塔一致。
+# 【为什么不用宝塔的 tomcat.sh】它在 aarch64 上会去下 x86_64 的 JDK rpm，
+#   导致 jsvc 编译失败。启停走仓库自备的 install/tomcat.initd（直接调 catalina.sh）。
+TC_VER=9.0.62
+TC_URL="https://archive.apache.org/dist/tomcat/tomcat-9/v${TC_VER}/bin/apache-tomcat-${TC_VER}.tar.gz"
+
+step_tomcat() {
+    if [ -x "$ROOT/www/server/tomcat/bin/catalina.sh" ]; then
+        log "Tomcat 已在 /www/server/tomcat，跳过"
+        return 0
+    fi
+    log "铺 Tomcat ${TC_VER} 到 /www/server/tomcat（这个面板版本不给 tomcat 安装脚本）"
+    if in_chroot "curl -fsSL --max-time 300 -o /tmp/tomcat.tar.gz '$TC_URL'" \
+       && in_chroot 'mkdir -p /www/server/tomcat && tar -xzf /tmp/tomcat.tar.gz -C /www/server/tomcat --strip-components=1 && rm -f /tmp/tomcat.tar.gz' \
+       && [ -x "$ROOT/www/server/tomcat/bin/catalina.sh" ]; then
+        chmod 755 "$ROOT"/www/server/tomcat/bin/*.sh 2>/dev/null || true
+        log "  Tomcat 就绪：$(in_chroot 'unzip -p /www/server/tomcat/lib/catalina.jar META-INF/MANIFEST.MF | grep -m1 Specification-Version' | tr -d "\r")"
+    else
+        warn "  Tomcat 没铺上（$TC_URL）—— 开机那步会跳过 tomcat，面板里也要自己装"
+    fi
 }
 
 # memcached：从宝塔的源码包自己编（1.6.45）
