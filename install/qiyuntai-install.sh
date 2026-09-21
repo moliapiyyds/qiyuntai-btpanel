@@ -329,6 +329,23 @@ step_plugins() {
 
 # ---------------- 6) 补丁 + 兼容层 ----------------
 step_patch() {
+    # 先把仓库自带的 init 脚本装进 chroot。
+    # 为什么必须做：chroot 里没有 systemd，而宝塔只带一部分 init 脚本 ——
+    # crond / tomcat 这两个是我们自己写的（见文件头注释）。
+    # 不装的话：service.sh 里 `start_svc tomcat` 会因为 /etc/init.d/tomcat 不存在
+    # 直接跳过，**Tomcat 起不来**（它没有兜底逻辑）；crond 有 /usr/sbin/crond 兜底，
+    # 但走 init 更统一。
+    # 实测踩过：这两个 .initd 原来只出现在文档里，没有任何脚本引用它们。
+    for s in crond tomcat; do
+        if [ -f "$REPO_DIR/install/$s.initd" ]; then
+            cp -f "$REPO_DIR/install/$s.initd" "$ROOT/etc/init.d/$s"
+            chmod 755 "$ROOT/etc/init.d/$s"
+            log "已装 init 脚本：/etc/init.d/$s"
+        else
+            warn "缺 install/$s.initd —— /etc/init.d/$s 不会存在，模块开机那步会跳过它"
+        fi
+    done
+
     log "打面板改造补丁（永久企业版 / 关闭更新 / 免绑定）"
     cp -f "$REPO_DIR/tools/moli_patch.py" "$ROOT/tmp/moli_patch.py"
     in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/moli_patch.py'
