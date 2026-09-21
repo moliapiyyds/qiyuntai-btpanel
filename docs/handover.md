@@ -148,7 +148,7 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 | 内容 | 位置 |
 | --- | --- |
 | 面板破解前的原文件 | `/data/openeuler/www/server/panel/moli_patch/backup_*/` |
-| 宝塔原版 lib.sh | `…/panel/install/lib.sh.bt-orig` —— 由 `install/qiyuntai-install.sh` 在覆盖前自动留一份（幂等，已存在则不覆盖） |
+| 宝塔原版 lib.sh | `…/panel/install/lib.sh.bt-orig` —— **实测宝塔 13.0.0 的面板包不带 `install/lib.sh`**，我们的 shim 是新建的，所以本机这个文件**不存在**。`step_components` 的留底逻辑本身是对的（只在原版存在时才留底），只是对这个面板版本没有原版可留 |
 | fail2ban 原 Debian 启动脚本 | `/data/openeuler/etc/init.d/fail2ban.debian-orig` |
 | fail2ban 原 jail.local | `/data/openeuler/etc/fail2ban/jail.local.moli-orig` |
 | 内核备份（此前） | `D:\PAR-AL00_…\my_backup\kernel.img` (md5 `ef5f17daaf4f0173ef5c71df6a706807`) |

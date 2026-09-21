@@ -216,7 +216,7 @@ sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh
 | 内容 | 位置 |
 | --- | --- |
 | 面板原始文件备份（破解前） | `/data/openeuler/www/server/panel/moli_patch/backup_*/` |
-| 宝塔原版 lib.sh | `/data/openeuler/www/server/panel/install/lib.sh.bt-orig`（覆盖前自动留的，幂等） |
+| 宝塔原版 lib.sh | **实测宝塔 13.0.0 面板包不带 `install/lib.sh`，本机没有这个文件**；shim 是新建的。留底逻辑只在原版存在时才生成 `lib.sh.bt-orig` |
 | fail2ban 原 Debian 启动脚本 | `/data/openeuler/etc/init.d/fail2ban.debian-orig` |
 | fail2ban 原 jail.local | `/data/openeuler/etc/fail2ban/jail.local.moli-orig` |
 | 破解补丁本体 | `/data/openeuler/www/server/panel/moli_patch/moli_patch.py`（可重复执行） |
