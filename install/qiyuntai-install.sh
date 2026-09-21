@@ -52,8 +52,12 @@ step_rootfs() {
     # 而且按 manifest.json 的顺序叠加 docker 层，多层镜像也不会解错顺序。
     pr="$REPO_DIR/install/prepare-rootfs.sh"
     if [ -f "$pr" ]; then
-        log "用 install/prepare-rootfs.sh 准备 rootfs"
-        sh "$pr" --root "$ROOT" || fail "rootfs 准备失败（按上面输出的提示处理）"
+        # 必须把「源」交出去：prepare-rootfs.sh 自己不知道要装哪个文件，
+        # 以前这里只传 --root，它会以「没给源。用 --url / --xz / --tar 之一」退出，
+        # 一键部署就卡死在 rootfs 这一步（2026-09-21 实测复现）。
+        # --mirror 让它用自己探好的下载器去列目录挑文件，不用在这里重复一套逻辑。
+        log "用 install/prepare-rootfs.sh 准备 rootfs（--mirror）"
+        sh "$pr" --root "$ROOT" --mirror || fail "rootfs 准备失败（按上面输出的提示处理）"
         return 0
     fi
 

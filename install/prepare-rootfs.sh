@@ -7,6 +7,7 @@
 # 只做「铺 rootfs」这一件事；装面板请接着跑 install/qiyuntai-install.sh。
 #
 # 用法（设备上 root 执行）：
+#   sh prepare-rootfs.sh --mirror                     # 自动从清华镜像挑文件并下载（一键部署走这条）
 #   sh prepare-rootfs.sh --url <tar.xz 的 URL>        # 从网络下（手机需能上网）
 #   sh prepare-rootfs.sh --xz  /sdcard/xxx.tar.xz     # 用已经下好的压缩包
 #   sh prepare-rootfs.sh --tar /sdcard/xxx.tar        # 用已经解压好的 docker tar
@@ -21,12 +22,18 @@
 set -u
 
 ROOT=/data/openeuler
-MIRROR_BASE="https://mirrors.tuna.tsinghua.edu.cn/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64"
+# 主源用官方（实测：默认 UA 也能下文件）。
+# 清华镜像对**文件下载**挑 User-Agent —— busybox 默认 UA 和 Mozilla/5.0 都直接 403，
+# 只有 Wget/1.21 能过（目录列表反而不挑）。踩过，所以放备用。
+MIRROR_BASE="https://repo.openeuler.org/openEuler-24.03-LTS-SP3/docker_img/aarch64"
+MIRROR_ALTS="https://mirrors.huaweicloud.com/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64 https://mirrors.tuna.tsinghua.edu.cn/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64"
 SRC_URL=""
+SRC_URL_ALT=""
 SRC_XZ=""
 SRC_TAR=""
 DO_LIST=0
 DO_UNMOUNT=0
+DO_MIRROR=0
 LAYER_DIR=/data/oe_layer
 
 die() { echo "x $*" >&2; exit 1; }
@@ -40,6 +47,7 @@ while [ $# -gt 0 ]; do
         --tar)  SRC_TAR="$2"; shift 2 ;;
         --root) ROOT="$2";    shift 2 ;;
         --list) DO_LIST=1;    shift ;;
+        --mirror) DO_MIRROR=1; shift ;;
         --unmount) DO_UNMOUNT=1; shift ;;
         -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) die "未知参数：$1（-h 看用法）" ;;
@@ -85,8 +93,9 @@ fetch() {
             else wget -O "$OUT_" -U 'Mozilla/5.0' "$URL"; fi
             ;;
         busybox)
-            if [ "$OUT_" = "-" ]; then $BUSYBOX wget -q -O - "$URL"
-            else $BUSYBOX wget -O "$OUT_" "$URL"; fi
+            # 必须带 UA：实测清华对文件下载挑 User-Agent，不带（或带 Mozilla/5.0）直接 403
+            if [ "$OUT_" = "-" ]; then $BUSYBOX wget -q -U 'Wget/1.21' -O - "$URL"
+            else $BUSYBOX wget -U 'Wget/1.21' -O "$OUT_" "$URL"; fi
             ;;
         *)
             return 1
@@ -133,6 +142,38 @@ if [ "$DO_LIST" = "1" ]; then
     exit 0
 fi
 
+# ---------- 只给了 --mirror：自己到镜像目录里挑出 rootfs 文件 ----------
+# 为什么需要这一段：本脚本自己不知道调用方想装哪个文件，而调用方
+# （install/qiyuntai-install.sh 的 step_rootfs）以前只传了 --root，
+# 于是这里会以「没给源。用 --url / --xz / --tar 之一」退出 ——
+# 一键部署必然卡死在 rootfs 这一步（2026-09-21 实测复现）。
+# 现在调用方传 --mirror，这里用上面已经探好的 $DL 去列目录挑文件。
+if [ "$DO_MIRROR" = "1" ] && [ -z "$SRC_URL" ] && [ -z "$SRC_XZ" ] && [ -z "$SRC_TAR" ]; then
+    echo ""
+    echo "---- 从镜像目录挑 rootfs ----"
+    if [ -z "$DL" ]; then
+        die "没有 curl/wget/busybox wget，无法列目录。请改用 --url/--xz/--tar 显式给源。"
+    fi
+    say "镜像：$MIRROR_BASE/"
+    ALL=$(fetch "$MIRROR_BASE/" - 2>/dev/null | grep -oE '[A-Za-z0-9._-]+\.tar\.xz' | sort -u)
+    IDX=$(printf '%s\n' "$ALL" | grep -x 'openEuler-docker\.aarch64\.tar\.xz' | head -1)
+    [ -n "$IDX" ] || IDX=$(printf '%s\n' "$ALL" | grep -E '^openEuler' | head -1)
+    if [ -n "$IDX" ]; then
+        say "选中：$IDX"
+    else
+        # 拿不到目录列表时退回已知文件名（清华镜像 openEuler-24.03-LTS-SP3 实测就是这个）
+        IDX="openEuler-docker.aarch64.tar.xz"
+        say "取不到目录列表，退回已知文件名：$IDX"
+    fi
+    SRC_URL="$MIRROR_BASE/$IDX"
+    SRC_URL_ALT=""
+    for M in ${MIRROR_ALTS:-}; do
+        SRC_URL_ALT="$SRC_URL_ALT $M/$IDX"
+    done
+    say "主源：$SRC_URL"
+    say "备用：${SRC_URL_ALT:-（无）}"
+fi
+
 # ---------- 安全护栏 ----------
 if [ -d "$ROOT/www/server/panel" ]; then
     echo ""
@@ -152,11 +193,29 @@ if [ -n "$SRC_URL" ]; then
     echo ""
     echo "---- 下载 $FN ----"
     [ -n "$DL" ] || die "URL 模式需要 curl 或 wget"
-    if [ -f "$OUT" ]; then
+    if [ -f "$OUT" ] && [ -s "$OUT" ]; then
         say "已存在，跳过下载：$OUT ($(du -h "$OUT" 2>/dev/null | cut -f1))"
     else
-        fetch "$SRC_URL" "$OUT" || die "下载失败（清单见 --list；也可在电脑上下好再 --xz/--tar 推过来）"
-        [ -s "$OUT" ] || die "下载出来是空文件：$OUT"
+        # 依次试主源和备用源。不能只看 fetch 的返回码：被拒绝时有些服务器
+        # 会返回一个很小的错误页而 rc=0，所以下完还要看大小（<1MB 一律视为失败）。
+        # 实测：清华对文件下载挑 UA，官方源和华为云不挑。
+        OK=0
+        for U in "$SRC_URL" ${SRC_URL_ALT:-}; do
+            say "试源：$U"
+            if fetch "$U" "$OUT" && [ -s "$OUT" ]; then
+                SZ=$(wc -c < "$OUT" 2>/dev/null || echo 0)
+                if [ "$SZ" -gt 1048576 ]; then
+                    say "下载成功：$((SZ / 1024 / 1024)) MB"
+                    OK=1
+                    break
+                fi
+                say "只拿到 $SZ 字节（疑似被拒），换下一个源"
+            else
+                say "这个源没成功，换下一个源"
+            fi
+            rm -f "$OUT"
+        done
+        [ "$OK" = "1" ] || die "所有源都下不下来。可在电脑上下好再 --xz/--tar 推过来"
     fi
     case "$FN" in
         *.tar.xz) SRC_XZ="$OUT" ;;
@@ -278,15 +337,22 @@ mountpoint -q "$ROOT/dev"     || mount --bind /dev "$ROOT/dev" 2>/dev/null
 mountpoint -q "$ROOT/dev/pts" || mount -t devpts -o gid=5,mode=0620 devpts "$ROOT/dev/pts" 2>/dev/null
 mountpoint -q "$ROOT/dev/shm" || mount -t tmpfs -o nosuid,nodev tmpfs "$ROOT/dev/shm" 2>/dev/null
 
-OSREL=$(chroot "$ROOT" /bin/bash -c 'head -1 /etc/os-release' 2>/dev/null | tr -d '\r')
-if [ -n "$OSREL" ]; then
-    say "chroot 可用：$OSREL"
-else
-    echo "！chroot 进不去。检查："
-    echo "    ls $ROOT/bin/bash   （rootfs 是否完整）"
-    echo "    上面 5 个挂载点是否都挂上"
-    echo "    dmesg | tail        （看 SELinux 是否拦截）"
-fi
+# 这里必须只用 bash 内建命令：宿主 shell 的 PATH 是 /system/bin:...，
+# 在 chroot 里根本不存在，用 head/cat 会 "command not found"，
+# 输出为空就被误判成「chroot 进不去」（实测踩过，白排查一轮）。
+OSOUT=$(chroot "$ROOT" /bin/bash -c 'IFS= read -r l < /etc/os-release; printf "%s" "$l"' 2>&1)
+case "$OSOUT" in
+    ""|*"command not found"*|*"No such file"*)
+        echo "！chroot 进不去。检查："
+        echo "    ls $ROOT/bin/bash   （rootfs 是否完整）"
+        echo "    上面 5 个挂载点是否都挂上"
+        echo "    dmesg | tail        （看 SELinux 是否拦截）"
+        [ -n "$OSOUT" ] && echo "    实际报错：$OSOUT"
+        ;;
+    *)
+        say "chroot 可用：$OSOUT"
+        ;;
+esac
 
 rm -rf "$LAYER_DIR"
 say "临时层目录已清理（下载文件留在 $WORK，重跑可复用）"
