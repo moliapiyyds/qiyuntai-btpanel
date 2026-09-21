@@ -46,6 +46,32 @@
   所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
   （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
 
+### 打补丁时缺 `node`，把补丁打成了「半截」
+
+* `tools/moli_patch.py` 的前端几步要用 `node --check` 校验改过的 JS，而 `node` 在
+  **新装环境里是后面才有的**（`nodejs` rpm）。实测（在刚装好的面板上跑）：
+  `FileNotFoundError` 直接把脚本打断 —— 后端那几条已经改完文件并留了备份，
+  前端那两条一条没做，日志里只有一段调用栈，`verify` 却显示「未生效」，
+  很容易被当成「补丁打完了」。
+* 两头堵：`moli_patch.py` 新增 `find_node()`（还找 `/www/server/nodejs/v*/bin/node`），
+  没有 node 就**明确跳过 + 打印提示**，不写没校验过的 JS（改坏一个 JS 会把面板 UI 打死）；
+  `step_deps` 加 `nodejs npm`，`step_patch` 打完补丁立刻跑一次 `verify`，
+  把「未生效」的条目逐条打出来并告警。
+* 修完后实测：装上 `nodejs`（v20.18.2，与基线一致）再重跑，8 条全部「正常」。
+
+### `deploy.sh --from-image` 路径三处修正
+
+* 拼接出来的整包（`/data/qyt-image.tar.xz`，几 GB）解包后没人删 → 现在解包成功即 `rm`。
+* 镜像清单读的位置不对：`make_image.sh` 已改成把 `IMAGE-MANIFEST.txt` 写在镜像外面，
+  这一头还只找镜像里面 → 改成优先找镜像目录、找不到再回退（兼容老镜像）。
+* 镜像路径漏了新步骤 `parity` → 现在是 `creds → plugins → parity → patch → module`。
+
+### `make_image.sh`：清单写到镜像外面
+
+原来清单写在 `$ROOT/IMAGE-MANIFEST.txt`，而 `$ROOT` 就是下一行要 `tar` 的整棵树 ——
+结果清单既被冻进镜像、又不在输出目录里所以上传命令带不上它，
+而 README 与 Release 说明里都是把它当附件列的。
+
 ### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
 
 * `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，

@@ -196,6 +196,27 @@ ipset v7.19: Kernel error received: Invalid argument
 拿「基线 rpm 包列表 / 基线 init.d 列表 / 基线 netstat 端口」三样东西反向对账，
 才查得出「文档承诺了、脚本从没做过」的东西。
 
+### 8. 打补丁时缺 `node`，补丁会「打一半」而且不报错
+`tools/moli_patch.py` 的前端那几步要用 `node --check` 校验改过的 JS，
+而 `node` 在**新装环境里是后面才有的**（`nodejs` rpm 由依赖对齐/插件那步装）。
+实测（2026-09-22，在刚装好的面板上跑）：`subprocess.run(['node', …])` 抛
+`FileNotFoundError`，**整个脚本在这里中断** —— 后端那几条（企业版 / 免绑定 / 去更新 /
+数据层 / 账户接口）已经改完文件并留了备份，前端那两条一条没做，
+日志里只有一段调用栈。`verify` 会显示：
+
+```
+前端授权兜底(0 个文件)        未生效
+浏览器版本检测已关(0 个页面)     未生效
+```
+
+看上去像「补丁打完了」，其实没有。两头堵：
+* `moli_patch.py` 新增 `find_node()`（还会找 `/www/server/nodejs/v*/bin/node`），
+  没有 node 就**明确跳过并打印提示**，不写没校验过的 JS（改坏一个 JS 会把面板 UI 打死）；
+* `step_deps` 加 `nodejs npm`，`step_patch` 打完补丁立刻跑一次 `verify`
+  并把「未生效」的条目打出来 + 告警 —— 「打完了」这句话得能被复核。
+
+修完后实测：装 `nodejs`（v20.18.2）再重跑，8 条全变「正常」。
+
 ---
 
 ## 三、MariaDB 起不来？两个 Android 特有的坑（都踩过）
