@@ -4,11 +4,15 @@
 # 作者：茉莉  QQ:1265274322  官方Q群:570387739
 # ------------------------------------------------------------
 # 在手机 root shell 里跑，一条命令从零到能用：
-#   su -c 'sh /data/local/tmp/qyt.sh'
+#   su -c 'sh /sdcard/install/deploy.sh'        # deploy.ps1 推上去的位置
+#   su -c 'sh /data/local/tmp/qiyuntai/install/deploy.sh'   # 自己放别处也行，路径随意
 #
 # 它会：
 #   1) 前置检查（root / aarch64 / 磁盘空间 / 工具 / SELinux）
-#   2) 本地没有完整仓库就自己从 GitHub 拉 main 分支并解包
+#   2) 仓库：优先用本地已有的（$REPO 就是本文件所在目录的上一级），
+#      本地没有才尝试从 GitHub 拉 —— **实测手机上连不通 github.com**
+#      （busybox wget 报 TLS record / Connection reset），拉不动时会提示
+#      改用电脑侧推送 + --repo-tar。所以正常路径是 deploy.ps1 先把仓库推上来。
 #   3) 铺 openEuler rootfs（已有面板环境会跳过）
 #   4) 装面板 + 组件 + 插件 + 打补丁 + 装 KernelSU 模块
 #   5) 打印登录信息并重启
