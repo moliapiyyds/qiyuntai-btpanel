@@ -348,6 +348,7 @@ tools/                   辅助脚本
   build_module_zip.sh     打可刷模块 zip（带版本自检）
   verify_sync.sh          本地 vs 远端比对 + Release 附件新鲜度（比内容，不比 zip 字节）
   make_image.sh           把装好的环境冻成可分卷镜像（预制宝塔，见「三、部署」）
+  audit_env.sh            环境体检：rpm 对齐 / 11 项服务 / 组件版本 / 面板与插件 / 自备文件
   ci.sh                   仓库自检：shellcheck / sh -n / py_compile / CRLF / BOM / 哈希格式
 
 docs/                    说明与记录

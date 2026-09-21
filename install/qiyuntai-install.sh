@@ -459,7 +459,9 @@ step_parity() {
     cat > "$ROOT/tmp/parity.sh" <<'EOS'
 #!/bin/bash
 # 基线 <NEVRA> 去掉「版本-发布.架构」两段就是包名（rpm 的版本/发布里不允许出现 -）
-sed -n 's/^\(.*\)-[^-]*-[^-]*\.\(aarch64\|noarch\|x86_64\)$/\1/p' \
+# 548 行里有一行没有 .架构 后缀：`gpg-pubkey-<8hex>-<8hex>`（导入的 GPG 公钥伪包），
+# 它会被过滤掉 —— 所以实际比的是 547 个真实包名。
+sed -n 's/^\(.*\)-[^-]*-[^-]*\.[A-Za-z0-9_]*$/\1/p' \
     /tmp/baseline-packages.txt | sort -u > /tmp/want.txt
 rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u > /tmp/have.txt
 comm -23 /tmp/want.txt /tmp/have.txt > /tmp/missing.txt
