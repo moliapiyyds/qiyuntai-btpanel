@@ -14,7 +14,11 @@
 # 凭据文件：/data/openeuler/root/qiyuntai-panel-info.txt
 # 启动日志：/data/adb/modules/qiyuntai_btpanel/boot.log
 # ============================================================
-MODDIR=${0%/*}
+# MODDIR：绝对路径调用（KSU/Magisk 就是这么调的）和手工相对调用都要能用
+case "$0" in
+    */*) MODDIR=${0%/*} ;;
+    *)   MODDIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) ;;
+esac
 ROOT=/data/openeuler
 INFO=$ROOT/root/qiyuntai-panel-info.txt
 BOOTLOG=$MODDIR/boot.log

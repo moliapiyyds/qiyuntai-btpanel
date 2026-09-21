@@ -23,6 +23,12 @@
 * **陈旧 pid 文件清理**：非正常关机后 `crond`/`redis` 的 pid 文件会残留，
   开机时先清掉再启动，避免「已在运行」的误判。
 * `module.prop` 描述改为：`点「执行」看地址账号密码｜卸载不删数据｜端口密码每台随机｜不保证兼容所有机型`
+* **修 `MODDIR` 推导**：原来四个脚本都写 `MODDIR=${0%/*}`，当 `$0` 不含 `/` 时
+  （手工 `cd 模块目录 && sh action.sh`）会退化成文件名本身，拼出的路径变成
+  `action.sh/action.sh`。实测在诊断提示里出现过 `sh customize.sh/action.sh diag`。
+  现在改成：绝对路径调用走 `${0%/*}`，相对调用走 `cd $(dirname $0) && pwd`。
+* **`customize.sh` 补 `action.sh` 的执行位**：原来只 chmod 了
+  `service.sh / uninstall.sh / customize.sh`，模块「执行」按钮可能因为缺执行位点不动。
 
 ### 安装脚本
 

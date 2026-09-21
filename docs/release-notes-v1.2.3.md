@@ -67,6 +67,10 @@ adb shell "su -c 'sh /sdcard/install/qiyuntai-install.sh'"
   `boot.log` 报错行 / 磁盘 / 破解补丁，**不重启任何服务**。
   另外主流程下面板自检不是 200 时会自动附诊断摘要。
 * **`customize.sh` 修 bug**：原来漏给 `action.sh` 加执行位，「执行」按钮可能点不动。
+* **修 `MODDIR` 推导**：四个脚本原来都写 `MODDIR=${0%/*}`，当 `$0` 不含 `/`
+  （手工 `cd 模块目录 && sh action.sh`）时会退化成文件名本身，
+  拼出来的路径变成 `action.sh/action.sh`。实测在诊断提示里出现过这一串。
+  现在绝对路径调用走 `${0%/*}`，相对调用走 `cd $(dirname $0) && pwd`。
 
 ### 安装脚本
 

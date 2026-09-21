@@ -10,7 +10,11 @@
 # 想彻底删除请自己确认后执行：rm -rf /data/openeuler
 # ============================================================
 
-MODDIR=${0%/*}
+# MODDIR：绝对路径调用（KSU/Magisk 就是这么调的）和手工相对调用都要能用
+case "$0" in
+    */*) MODDIR=${0%/*} ;;
+    *)   MODDIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) ;;
+esac
 ROOT=/data/openeuler
 LOG=$MODDIR/uninstall.log
 CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
