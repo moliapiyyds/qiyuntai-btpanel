@@ -28,8 +28,8 @@ cd qiyuntai-btpanel
 $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
 ```
 
-剩下的全自动：找 adb → 等设备 → 探 root → 推 `install/` + `module/` → 手机上铺 rootfs
-→ 装面板/组件/插件/打补丁 → 装 KernelSU 模块 → **自动重启**。
+剩下的全自动：找 adb → 等设备 → 探 root → 推 `install/` + `module/` + `tools/` → 手机上铺 rootfs
+→ 装面板/组件 → 装 9 个面板插件 + memcached → 基线包对齐 → 打补丁 → 装 KernelSU 模块 → **自动重启**。
 重启后点模块的「执行」按钮，地址和账号密码会直接打印出来。
 
 > 耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）。
@@ -47,7 +47,7 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 | 环境组件 | **OpenResty 1.31.1.1**、**MariaDB 10.11.16**、**PHP 8.2.33**、**phpMyAdmin 5.2**、**Redis 7.2.16**、**Memcached 1.6.45**、**Tomcat 9.0**、**Supervisor 4.2.4** |
 | 管理插件 | Fail2ban 2.6、Node.js版本管理器 2.8（内置 node **v20.18.3**）、java环境管理器 / jdk_manager（内置 JDK **17.0.20.8**）、Python项目管理器（`pythonmamager`）、python环境管理器（`pyenv_manager`）、Supervisor 进程管理器、Tomcat（`tomcat2`）、Redis |
 | 额外环境 | Python 3.13.14 + pip/venv、OpenJDK 17.0.20.8 / 11.0.32.9 / 1.8.0_502、Node.js **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `/usr/bin/node`）+ npm 10.8.2、git/vim/htop/tmux/jq/sqlite3、完整编译链、iptables-legacy |
-| 开机自启 | KernelSU 模块 `qiyuntai_btpanel`：挂 chroot → 写 DNS → 修正 Android 网络限制 → 依次拉起 **面板/nginx/MariaDB/PHP-FPM/Fail2ban/crond/Redis/Memcached/Tomcat/supervisord** → 自检 |
+| 开机自启 | KernelSU 模块 `qiyuntai_btpanel`：挂 chroot → 写 DNS → 修正 Android 网络限制 → 依次拉起 **11 项**：面板/nginx/MariaDB/PHP-FPM/Fail2ban/crond/Redis/Memcached/Tomcat + supervisord + sshd（adb 不通时的兜底通道） → 自检 |
 
 ---
 
@@ -105,13 +105,15 @@ cd qiyuntai-btpanel
 
 ```
 1) 找 adb → 等设备 → 确认手机上能拿到 root → 查架构与磁盘
-2) 把 install/ 和 module/ 推到手机（同一层目录）
+2) 把 install/ module/ tools/ 推到手机（同一层目录）
 3) 在手机上跑 install/deploy.sh，自动完成：
      铺 openEuler rootfs（清华镜像）
      → 挂载 chroot → dnf 装编译依赖
      → 宝塔官方脚本装面板
-     → 装 OpenResty / MariaDB / PHP / phpMyAdmin / Fail2ban
-     → 打补丁（永久企业版 / 关闭更新 / 免绑定）+ 服务兼容层
+     → 装 OpenResty / MariaDB / PHP / phpMyAdmin
+     → 装 9 个面板插件 + 从宝塔源码包编 memcached 1.6.45
+     → 基线包对齐（按 install/baseline-packages.txt 逐名补齐）
+     → 打补丁（永久企业版 / 关闭更新 / 免绑定）+ 服务兼容层 + 装 3 个自备 init 脚本 + sshd 配置
      → 装 KernelSU 模块
 4) 自动重启手机
 ```
@@ -197,6 +199,28 @@ sh install/deploy.sh --from-image /sdcard/qyt_image
   不重新随机，所有用同一镜像的人就完全一样
 * 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**）
 
+**现成的镜像在哪**：Release（当前 `v1.2.5`）的附件里就有 `qyt-image.part-*` 分卷和
+`SHA256SUMS.txt`（分卷按 1900 MB 切开，GitHub 单附件上限 2 GiB）。
+全部下到**同一个目录**再喂给 `--from-image`（分卷名要按 `part-aaa / -aab / …` 顺序排好，
+`cat qyt-image.part-*` 是按名字拼的）：
+
+```powershell
+# 1) 电脑上下载全部分卷 + 校验和
+& gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'qyt-image*' --dir .\qyt_image
+& gh release download v1.2.5 --repo moliapiyyds/qiyuntai-btpanel --pattern 'SHA256SUMS.txt' --dir .\qyt_image
+
+# 2) 推到手机（几 GB 走 USB，耐心等）
+adb shell "su -c 'mkdir -p /sdcard/qyt_image'"
+adb push .\qyt_image\. /sdcard/qyt_image/
+
+# 3) 手机上：先空出 /data/openeuler，再从镜像铺
+adb shell "su -c 'sh /sdcard/install/prepare-rootfs.sh --clean'"
+adb shell "su -c 'sh /sdcard/install/deploy.sh --from-image /sdcard/qyt_image'"
+```
+
+`--from-image` 会自己 `cat` 分卷 → 重算 sha256 与 `SHA256SUMS.txt` 比对 →
+**对不上就直接停下、不铺环境**。（不想用 `gh` 就浏览器点 Release 附件下载，效果一样。）
+
 ### 只想装 / 更新模块（环境已经好了）
 
 ```powershell
@@ -234,7 +258,18 @@ adb shell "su -c '/data/adb/ksud module uninstall qiyuntai_btpanel'"
 ```
 
 `uninstall.sh` **只停服务 + 解挂载，不删 `/data/openeuler`** —— 网站、数据库、面板配置全部保留。
-要彻底删掉请自己确认后执行 `rm -rf /data/openeuler`。
+
+要彻底删掉，**别直接 `rm -rf /data/openeuler`**：chroot 里 `dev` / `proc` / `sys` 是
+`mount --bind` 进来的，带着挂载 `rm -rf` 会**顺着 bind 把宿主机的 `/dev` 删掉**
+（这个坑踩过两次，见 `docs/pitfalls.md` §六.2 / §六.4，第一次是黑屏、得靠 `mknod` 重建设备节点 +
+`echo b > /proc/sysrq-trigger` 才救回来）。用这两条：
+
+```sh
+# 只删环境（先解挂 → 断言挂载数为 0 → 再删）
+adb shell "su -c 'sh /sdcard/install/prepare-rootfs.sh --clean'"
+# 或者用模块自带的 --purge（同样带断言）
+adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh --purge'"
+```
 
 ---
 
@@ -290,7 +325,7 @@ module/                  KernelSU 模块（刷这个）
   README.md               模块使用说明
 
 install/                 设备上执行的部署脚本
-  deploy.sh               一键部署总入口（--check / --repo-only / --no-reboot）
+  deploy.sh               一键部署总入口（--check / --repo-only / --from-image / --no-reboot 等）
   prepare-rootfs.sh       铺 openEuler rootfs（按 manifest.json 顺序叠层）
   qiyuntai-install.sh     一键装：rootfs → 挂载 → 依赖 → 面板 → 凭据 → 组件 → 插件 → 基线包对齐 → 补丁 → 模块
   chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
@@ -320,7 +355,7 @@ docs/                    说明与记录
   pitfalls.md             踩坑记录（全部为实测结论）
   release-notes-v1.2.5.md 当前版本的 Release 说明
   release-notes-v1.2.4.md 上一版（历史保留）
-  release-notes-v1.2.3.md 上一版（历史保留）
+  release-notes-v1.2.3.md 更早的一版（历史保留）
   private-deployment.md   本机真实地址与口令（已 gitignore，不进仓库）
 
 CHANGELOG.md              更新日志
@@ -341,8 +376,10 @@ CHANGELOG.md              更新日志
 * Fail2ban **2.6** 插件（内含 fail2ban 1.1.1.dev1）：启动 → 封禁 `203.0.113.9` → `iptables-legacy` 出现 `f2b-sshd` 规则 → 解封后规则消失
 * 补丁生效：`get_soft_list` 返回 `ltd=0 / pro=-1`（面板显示企业版·永久）。**不是 -2** —— 原因见 `docs/pitfalls.md` §一.7、`is_bind()` 恒真、升级脚本已空壳
 * 商店状态核对：nginx / mysql(MySQL 卡片) / php-8.2 / phpmyadmin / fail2ban / nodejs 全部 **已安装**
-* **两次重启实测**：模块自动挂载 chroot、写 DNS、拉起 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / Redis，
-  面板自检 `HTTP=200`，端口 80/888/3306 与面板端口全部监听（日志见 `boot.log`）
+* **两次重启实测**（2026-09-20，当时开机服务只有 7 项）：模块自动挂载 chroot、写 DNS、拉起 bt / nginx / MariaDB / php-fpm-82 / fail2ban / crond / Redis，
+  面板自检 `HTTP=200`，端口 80/888/3306 与面板端口全部监听（日志见 `boot.log`）。
+  v1.2.3 起服务扩到 **11 项**（补 Memcached / Tomcat / supervisord / sshd），
+  完整重装后的逐项复核见 `docs/handover.md`。
 
 
 ---
