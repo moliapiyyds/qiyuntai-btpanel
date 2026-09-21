@@ -431,9 +431,15 @@ step_memcached() {
         warn "从宝塔源码包编 memcached 失败，退回 openEuler 源的 1.6.22（与基线版本不同，功能一样）"
         in_chroot 'dnf install --skip-broken -y memcached' || warn "  dnf 兜底也没成"
     fi
-    # 基线那个 init 脚本用 -u memcached，所以得有这个用户
+    # memcached 用户：init 脚本用 -u memcached 起（memcached 拒绝以 root 跑），
+    # 而它降权时只 setgid/setuid、**不带附加组**（实测进程的 Groups 是空的），
+    # 所以必须把**主组**设成 inet(3003)，否则 bind 127.0.0.1 会被 Android 的
+    # paranoid-network 拒绝：failed to listen on one of interface(s) 127.0.0.1: Permission denied
+    in_chroot 'grep -q "^inet:" /etc/group || echo "inet:x:3003:" >> /etc/group'
     in_chroot 'id memcached >/dev/null 2>&1 || useradd -r -s /sbin/nologin -d /var/lib/memcached memcached' \
         || warn "  建 memcached 用户失败（init 脚本会退化成 -u root）"
+    in_chroot 'usermod -g inet memcached' || warn "  设 memcached 主组失败（它会 bind 失败）"
+    log "  memcached 身份：$(in_chroot 'id memcached' | tr -d '\r')"
 }
 
 # ---------------- 6) 补丁 + 兼容层 ----------------

@@ -167,7 +167,7 @@ start_svc() {
 # 这里开机兜底：补组 + 校正 MariaDB 数据目录属主（幂等）。
 if run_in "[ -f /etc/group ]"; then
     run_in "grep -q '^inet:' /etc/group || echo 'inet:x:3003:' >> /etc/group"
-    for u in mysql www redis memcached; do
+    for u in mysql www redis; do
         if run_in "id $u >/dev/null 2>&1"; then
             if ! run_in "id -nG $u 2>/dev/null | tr ' ' '\n' | grep -qx inet"; then
                 log "修正：把 $u 用户加入 inet(gid 3003) 组"
@@ -175,6 +175,14 @@ if run_in "[ -f /etc/group ]"; then
             fi
         fi
     done
+    # memcached 要改**主组**，不是加附加组：它降权时只 setgid/setuid、不带附加组，
+    # 实测进程的 Groups 是空的 → 只加 -aG 不生效，bind 会 EACCES（见 pitfalls §二）
+    if run_in "id memcached >/dev/null 2>&1"; then
+        if ! run_in "id -gn memcached 2>/dev/null | grep -qx inet"; then
+            log "修正：把 memcached 用户的主组改为 inet(gid 3003)"
+            run_in "usermod -g inet memcached"
+        fi
+    fi
     if run_in "[ -d /www/server/data ]"; then
         run_in "chown -R mysql:mysql /www/server/data 2>/dev/null"
     fi

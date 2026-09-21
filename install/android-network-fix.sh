@@ -28,12 +28,16 @@ if ! grep -q '^inet:' "$R/etc/group"; then
 fi
 
 # 2) 把 chroot 里需要监听 TCP 的服务账号加进 inet 组
-#    memcached 是 2026-09-22 补上的：它的 init 脚本用 -u memcached 起（memcached 不允许
-#    以 root 跑），而这个用户默认不在 gid 3003 → bind 127.0.0.1:11211 直接失败，
-#    表现就是「memcached 启动失败」而没有任何别的提示。
-for u in mysql www redis memcached; do
+#    memcached 要特殊处理，是 2026-09-22 实测出来的：
+#    它的 init 脚本用 `-u memcached` 起（memcached 拒绝以 root 跑），而 memcached
+#    降权时只做 setgid/setuid、**不带附加组**（实测进程里 `Groups:` 是空的），
+#    所以光 `usermod -aG inet` 不生效 —— 必须把它的**主组**设成 inet(3003)，
+#    否则 bind 127.0.0.1:11211 直接失败，日志里只有一句：
+#      failed to listen on one of interface(s) 127.0.0.1: Permission denied
+for u in mysql www redis; do
     $CH /bin/bash -c "id $u >/dev/null 2>&1 && usermod -aG inet $u" 2>/dev/null
 done
+$CH /bin/bash -c "id memcached >/dev/null 2>&1 && usermod -g inet memcached" 2>/dev/null
 
 # 3) 校正 MariaDB 数据目录属主（幂等；只在目录存在时执行）
 $CH /bin/bash -c "[ -d /www/server/data ] && chown -R mysql:mysql /www/server/data" 2>/dev/null
