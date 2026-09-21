@@ -105,11 +105,20 @@ bt 6      # 修改面板入口
 
 模块 `service.sh` 在系统启动完成后依次执行（幂等，重复执行安全）：
 
-1. 挂载 chroot：`/dev`、`/dev/pts`、`/dev/shm`、`/proc`、`/sys`
-2. 写入 chroot 内 `/etc/resolv.conf`（DNS 取自 `net.dns1/dns2`，缺省补 223.5.5.5）
-3. 修正 MariaDB 前置条件（把 `mysql` 用户加入 `inet` 组 = Android AID_INET 3003；校正数据目录属主）
-4. 依次启动：**宝塔面板 → Nginx/OpenResty → MariaDB → PHP 8.2 FPM → Fail2ban → crond → Redis**
-5. 自检面板端口是否响应（完整浏览器 UA），结果写进 `boot.log`
+1. 等系统启动完成（`sys.boot_completed`）
+2. 挂载 chroot：`/dev`、`/dev/pts`、`/dev/shm`、`/proc`、`/sys`
+3. 写入 chroot 内 `/etc/resolv.conf`（DNS 取自 `net.dns1/dns2`，缺省补 223.5.5.5）
+4. **注册 KernelSU 管理器**（把 appid 写进内核参数，带后台重试最多 2 分钟）。
+   本内核不持久化 manager appid，所以**每次开机都要做**；不做的话管理器首页会显示
+   「不支持 / 未集成」「不支持非 GKI 内核」——那其实是"管理器没在内核里被认领"，不是内核坏了
+5. 修正 Android 网络限制（把 `mysql` / `www` / `redis` 加入 `inet` 组 = AID_INET 3003；
+   校正 MariaDB 数据目录属主）—— 不做的话 `mariadbd` 会 `errno 13` 起不来
+6. 清陈旧 pid 文件（chroot 的 `/var/run` 落在 `/data` 上，重启不清空，
+   留着会让 init 脚本误判"服务已在运行"而跳过启动）
+7. 依次启动 **11 项**：
+   **宝塔面板 → Nginx/OpenResty → MariaDB → PHP 8.2 FPM → Fail2ban → crond → Redis
+   → Memcached → Tomcat → supervisord**，**sshd** 单独兜底（adb 不通时的救命通道）
+8. 自检面板端口是否响应（完整浏览器 UA），结果写进 `boot.log`
 
 启动日志：`/data/adb/modules/qiyuntai_btpanel/boot.log`
 
@@ -146,6 +155,7 @@ bt 6      # 修改面板入口
 | PHP | **8.2** | `/www/server/php/82`，php-fpm |
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin` |
 | Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 已实测可封禁/解封 IP |
+| 管理插件 | 共 **9 个**：`fail2ban` / `redis` / `tomcat2` / `supervisor` / `nodejs` / `java_manager` / `jdk_manager` / `pyenv_manager` / `pythonmamager` | 走宝塔插件下载接口装的（`tools/plugin_install.py`），面板「软件商店 → 已安装」里能正常显示、能启停。上面表里的 Redis / Tomcat / Supervisor / Node.js / JDK 都是这三个插件提供的，不是 dnf 装的 |
 | Redis | **7.2.16** | dnf 安装，开机自动拉起 |
 | Tomcat | **9.0** | 插件 `tomcat2` |
 | Supervisor | **4.2.4** | 进程守护管理器 |
@@ -178,12 +188,16 @@ bt 6      # 修改面板入口
 # 进 chroot
 chroot /data/openeuler /bin/bash
 
-# 服务管理（chroot 内）
+# 服务管理（chroot 内）—— 11 项，和开机拉起的同一套
 /etc/init.d/bt start|stop|restart
 /etc/init.d/nginx start|stop|restart
 /etc/init.d/mysqld start|stop|restart
 /etc/init.d/php-fpm-82 start|stop|restart
 /etc/init.d/fail2ban start|stop|restart
+/etc/init.d/crond start|stop|restart
+/etc/init.d/redis start|stop|restart
+/etc/init.d/memcached start|stop|restart
+/etc/init.d/tomcat start|stop|restart
 
 # 也可以直接用兼容层
 systemctl restart nginx
@@ -192,8 +206,8 @@ systemctl restart nginx
 tail -f /data/openeuler/www/server/panel/logs/error.log
 tail -f /data/adb/modules/qiyuntai_btpanel/boot.log
 
-# 看一眼当前跑着哪些服务
-ps -ef | grep -E "BT-Panel|nginx|mysqld|php-fpm|fail2ban"
+# 看一眼当前跑着哪些服务（supervisord/fail2ban 的 comm 是 python3，所以也搜 cmdline）
+ps -ef | grep -E "BT-Panel|BT-Task|nginx|mariadbd|php-fpm|fail2ban|redis|memcached|tomcat|supervisord"
 ```
 
 ---
