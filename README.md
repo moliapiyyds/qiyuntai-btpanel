@@ -303,6 +303,8 @@ install/                 设备上执行的部署脚本
   bt-panel-install.exp   驱动宝塔官方安装器：分配 pty、按「提示内容」作答（不依赖提问顺序）
   installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单
   baseline-packages.txt  标准环境的 548 个 rpm 包清单（parity 步骤按它对齐，只比包名）
+                         sha256 4b3c870ad51d957f3c357aa97a96d921fde358264b77f9f2319d591eb2890f31
+                         与删除前那台的 `rpm -qa` 输出逐字节一致（20899 字节）
 
 tools/                   辅助脚本
   moli_patch.py           面板改造补丁（永久企业版 / 关闭更新 / 免绑定），幂等
