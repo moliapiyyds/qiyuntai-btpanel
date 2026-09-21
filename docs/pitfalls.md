@@ -51,10 +51,40 @@ payload = public.get_user_info() + {name, version, os}
 所以本仓库的 `tools/plugin_install.py` 直接调面板自己的
 `install_plugin()`（下载+解包）→ `input_package()`（执行 install.sh）两步装插件。
 
-### 6. 面板反爬虫
-`BTPanel/__init__.py` 里有 `if public.is_spider(): return abort(404)`。
-`curl` 默认 UA 访问面板入口会得到宝塔自己的 404 页（`Server: nginx` 是它伪装的）。
-浏览器 UA 即正常 200。
+### 6. 面板反爬虫：UA 分界线（2026-09-21 实测补全）
+
+`BTPanel/__init__.py` 的登录路由里有：
+
+```python
+if public.is_spider(): return abort(404)
+# is_spider() -> panelDefense.bot_safe().spider(UA, remote_addr)
+```
+
+命中后返回宝塔自己伪装的 nginx 404 页（`Server: nginx`，146 字节）。两个坑点：
+
+1. **这条 404 不写请求日志** —— `logs/request/<日期>.json` 的最后一条仍停在上一次成功
+   请求，看上去"面板没收到请求"，极易误判成面板挂了。
+2. 同一个 404 页还有另一个来源，而且**是设计如此**：设了安全入口后，非入口路径
+   （`/`、`/login`、`/favicon.ico`）一律 404。
+
+实测 UA 分界线（打 `http://127.0.0.1:<port><入口路径>`，返回码）：
+
+| User-Agent | 结果 |
+|---|---|
+| `Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/120.0 Safari/537.36` | 200 |
+| `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36` | 200 |
+| 华为浏览器原样 UA（`… AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 HuaweiBrowser/11.0.7.303 Mobile Safari/537.36`） | 200 |
+| `Mozilla/5.0`（裸） | **404** |
+| `curl/8.9.1` | **404** |
+| `Wget/1.21` | **404** |
+
+即 **UA 里必须带 `AppleWebKit` + `Chrome/` 这类浏览器特征**，只有 `Mozilla/5.0`
+前缀是不够的。
+
+所以判断"面板活没活"必须**打完整入口路径 + 带浏览器 UA**。本仓库
+`module/action.sh` 的 HTTP 探测和 `module/service.sh` 的开机自检都是这么写的。
+排查顺序：① 入口路径 + 完整浏览器 UA → 200，说明面板本身没问题，别再折腾面板；
+② 仍然是 404，再去查 `data/admin_path.pl` 与 `data/port.pl`。
 
 ### 7. 破解点（本仓库做法）
 * **等级显示**：前端 `utils.js` 用 cookie 判断——
