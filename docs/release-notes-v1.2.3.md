@@ -20,31 +20,49 @@ README.md        使用说明
 
 ## 安装
 
-模块本身**只管开机自启**，不含 chroot 环境。所以顺序是：
+**一键部署（推荐）** —— 电脑上执行（电脑能连 GitHub、有 adb）：
 
-**第 1 步 —— 铺 rootfs（约 400 MB）**
-
-```sh
-# 方式 A：设备能上网，直接下
-sh /sdcard/prepare-rootfs.sh --url <清华镜像的 openEuler-docker.aarch64.tar.xz 地址>
-# 列可用文件：sh /sdcard/prepare-rootfs.sh --list
-
-# 方式 B：电脑上下好再推（Android 9 的 toybox 没有 curl/wget/xz，这条更稳）
-xz -d openEuler-docker.aarch64.tar.xz
-adb push openEuler-docker.aarch64.tar /sdcard/
-adb shell "su -c 'sh /sdcard/prepare-rootfs.sh --tar /sdcard/openEuler-docker.aarch64.tar'"
+```powershell
+git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
+cd qiyuntai-btpanel
+.\deploy.ps1
 ```
 
-**第 2 步 —— 装面板与组件**
+脚本会自动：找 adb → 等设备 → 确认 root → 推 `install/` 和 `module/` → 在手机上跑
+`install/deploy.sh`（铺 rootfs → 装面板/组件/插件/补丁 → 装模块）→ 重启手机。
+
+参数：`-Check` 只体检 / `-PushOnly` 只推文件 / `-NoReboot` 不自动重启 / `-Adb <路径>`。
+
+分步来也可以：
 
 ```sh
 adb push install/ /sdcard/install/
-adb shell "su -c 'sh /sdcard/install/qiyuntai-install.sh'"
+adb push module/  /sdcard/module/
+adb shell "su -c 'sh /sdcard/install/deploy.sh --check'"    # 先体检
+adb shell "su -c 'sh /sdcard/install/deploy.sh'"            # 全自动装
 ```
 
-**第 3 步 —— 刷本模块，重启**
+**只想要模块（环境已经好了）？** 直接刷这个 zip：
 
-**第 4 步 —— 点模块的「执行」按钮**，拿地址、账号、密码。
+```sh
+adb push qiyuntai_btpanel-v1.2.3.zip /sdcard/
+adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.3.zip'"
+```
+
+拿地址账号密码：
+
+```sh
+adb shell "su -c '/data/adb/ksud module action qiyuntai_btpanel'"
+```
+
+出问题先诊断：
+
+```sh
+adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/action.sh diag'"
+```
+
+> `ksud` 在 `/data/adb/ksud`（不在 PATH 里）。手工装**别用** `cp -r module 目标` ——
+> 目标已存在时会嵌套成 `目标/module/module.prop`，模块加载不了。
 
 > 没先铺 rootfs 就刷模块也不会坏 —— `customize.sh` 会告警，开机流程会等环境就绪。
 

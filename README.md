@@ -60,34 +60,127 @@
 
 ---
 
-## 三、安装步骤（从零）
+## 三、部署
 
-> 需要：已 root（KernelSU / Magisk）、`su` 可用、`/data` 有 ≥8 GB 空闲、能连外网。
+> 前提：**arm64 设备**、已 root（KernelSU-Next / KernelSU / Magisk 都行）、`/data` 空闲 **≥ 8-10 GB**。
+> 全程只写 `/data/openeuler` 与 `/data/adb/modules`，不动系统分区。
 
-```sh
-# 1) 取 openEuler aarch64 rootfs（清华镜像，约 39 MB）
-#    https://mirrors.tuna.tsinghua.edu.cn/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64/
-#    文件名形如 openEuler-docker.aarch64.tar.xz
-xz -d openEuler-docker.aarch64.tar.xz
-mkdir -p /data/openeuler
-tar -xf openEuler-docker.aarch64.tar -C /data/oe_layer
-# 把 layer 里的文件系统解到 /data/openeuler（具体见 install/qiyuntai-install.sh）
+### 一键部署（推荐）
 
-# 2) 挂载 chroot
-/data/adb/modules/qiyuntai_btpanel/service.sh    # 或按 install 脚本里的 mount 段手动挂
+电脑上执行（电脑要能连 GitHub，且装了 adb）：
 
-# 3) 一键部署（chroot 内装面板 + 组件 + 打补丁）
-sh install/qiyuntai-install.sh
-
-# 4) 装模块
-cp -r module /data/adb/modules/qiyuntai_btpanel
-chmod 755 /data/adb/modules/qiyuntai_btpanel/*.sh
-# 重启手机，服务自动起来
+```powershell
+git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
+cd qiyuntai-btpanel
+.\deploy.ps1
 ```
 
-详细的分步说明见 `install/` 目录下的脚本注释。
+**就这一条。** 脚本会自动做完：
+
+```
+1) 找 adb → 等设备 → 确认手机上能拿到 root → 查架构与磁盘
+2) 把 install/ 和 module/ 推到手机（同一层目录）
+3) 在手机上跑 install/deploy.sh，自动完成：
+     铺 openEuler rootfs（清华镜像）
+     → 挂载 chroot → dnf 装编译依赖
+     → 宝塔官方脚本装面板
+     → 装 OpenResty / MariaDB / PHP / phpMyAdmin / Fail2ban
+     → 打补丁（永久企业版 / 关闭更新 / 免绑定）+ 服务兼容层
+     → 装 KernelSU 模块
+4) 自动重启手机
+```
+
+耗时较长（源码编译 OpenResty / MariaDB / PHP），**MariaDB 编译峰值约 2 GB 内存**。
+
+| 参数 | 作用 |
+| --- | --- |
+| `-Check` | 只体检（设备 / root / 架构 / 磁盘），不推不装 |
+| `-PushOnly` | 只把文件推到手机，安装你自己来 |
+| `-NoReboot` | 装完不自动重启 |
+| `-Adb <路径>` | 指定 adb（默认自动找 `tools\adb\adb.exe`、`PATH`、常见安装位置） |
+
+**不想 clone 的，一行搞定**（PowerShell）：
+
+```powershell
+$d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
+```
+
+> **为什么仓库在电脑侧准备，而不是让手机自己下？**
+> 实测手机上的 `busybox wget` 连 `github.com` 会被重置
+> （`wget: got bad TLS record (len:0) ... Connection reset by peer`），
+> 而清华镜像能连上（rootfs 就是从那儿下的）。所以电脑拉好再推过去最稳。
+
+### 分步部署（想自己控制的用这个）
+
+```sh
+# 1) 推文件（install/ 和 module/ 必须在同一层目录）
+adb push install/ /sdcard/install/
+adb push module/  /sdcard/module/
+
+# 2) 体检，不装任何东西
+adb shell "su -c 'sh /sdcard/install/deploy.sh --check'"
+
+# 3) 全自动装（--no-reboot 可以装完不重启）
+adb shell "su -c 'sh /sdcard/install/deploy.sh'"
+```
+
+`install/deploy.sh` 也可以单独用：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--check` | 只做前置检查 |
+| `--repo-only` | 只把仓库拉到本地（手机上） |
+| `--repo-tar <文件>` | 仓库用本地已推过来的 tar.gz，不连 GitHub |
+| `--url <tar.xz>` | rootfs 走指定 URL |
+| `--tar <文件>` | rootfs 用本地已解压好的 docker tar |
+| `--no-reboot` | 装完不重启 |
+
+> 手机上只有 `busybox` 可用（没有 curl / wget / xz），所以：
+> **rootfs 能从清华镜像下**（HTTP/HTTPS 都行），**仓库不能从 GitHub 下**。
+> 想完全在手机上自举，先把仓库打包推上去再用 `--repo-tar`。
+
+### 只想装 / 更新模块（环境已经好了）
+
+```powershell
+adb push qiyuntai_btpanel-v1.2.3.zip /sdcard/
+adb shell "su -c '/data/adb/ksud module install /sdcard/qiyuntai_btpanel-v1.2.3.zip'"
+```
+
+* `ksud` 的真实路径是 **`/data/adb/ksud`**（不在 `PATH` 里）
+* 解包到 `/data/adb/modules_update/<id>`，执行 `customize.sh`，**重启后生效**
+* KernelSU 管理器里「从本地安装」选同一个 zip 也一样
+
+> 手工装**别用** `cp -r module /data/adb/modules/qiyuntai_btpanel` ——
+> 目标目录已存在时 `cp -r` 会嵌套成 `…/qiyuntai_btpanel/module/module.prop`，模块加载不了（实测如此）。
+> 要用 `cp` 就这么写：`mkdir -p 目标 && cp -f module/* 目标/`
+
+### 装完怎么用
+
+```sh
+# 拿地址、账号、密码（三种都行）
+adb shell "su -c '/data/adb/ksud module action qiyuntai_btpanel'"
+adb shell "su -c 'cat /data/openeuler/root/qiyuntai-panel-info.txt'"
+# 或 KernelSU 管理器里点模块的「执行」按钮
+
+# 出问题先诊断
+adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/action.sh diag'"
+```
+
+`diag` 检查：挂载点 / chroot 可用性 / `inet` 组 / 服务进程 / 端口监听 / 面板自检 /
+磁盘 / `boot.log` 报错行 / 面板关键文件 / 破解补丁，**不重启任何服务**。
+
+### 卸载
+
+```sh
+adb shell "su -c '/data/adb/ksud module uninstall qiyuntai_btpanel'"
+```
+
+`uninstall.sh` **只停服务 + 解挂载，不删 `/data/openeuler`** —— 网站、数据库、面板配置全部保留。
+要彻底删掉请自己确认后执行 `rm -rf /data/openeuler`。
 
 ---
+
+详细的分步说明见 `install/` 目录下的脚本注释。
 
 ## 四、注意事项（重点）
 
@@ -127,6 +220,9 @@ chmod 755 /data/adb/modules/qiyuntai_btpanel/*.sh
 ## 六、仓库结构
 
 ```
+deploy.ps1               PC 侧一键部署（电脑能连 GitHub，手机只负责装）
+install/deploy.sh        手机侧一键部署（自举：拉仓库 → 铺 rootfs → 装全套 → 重启）
+
 module/                  KernelSU 模块（刷这个）
   module.prop             模块信息（id / 版本 / 作者）
   customize.sh            安装时执行：检测环境、给脚本加执行位
@@ -136,6 +232,7 @@ module/                  KernelSU 模块（刷这个）
   README.md               模块使用说明
 
 install/                 设备上执行的部署脚本
+  deploy.sh               一键部署总入口（--check / --repo-only / --no-reboot）
   prepare-rootfs.sh       铺 openEuler rootfs（按 manifest.json 顺序叠层）
   qiyuntai-install.sh     一键装：rootfs → 挂载 → 面板 → 组件 → 补丁 → 模块
   chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
