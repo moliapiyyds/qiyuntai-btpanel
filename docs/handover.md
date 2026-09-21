@@ -159,22 +159,57 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 
 仓库在 GitHub：`https://github.com/moliapiyyds/qiyuntai-btpanel`，本机 `D:\tc\recon\qiyuntai-repo` 是它的工作副本。
 
+### 日常改动
+
 ```bash
-# 改完东西推上去
-cd D:\tc\recon\qiyuntai-repo
+cd /mnt/d/tc/recon/qiyuntai-repo        # WSL 里；Windows 侧是 D:\tc\recon\qiyuntai-repo
+bash tools/ci.sh                        # 先本地跑一遍 9 项自检
 git add -A && git commit -m "..." && git push origin main
+bash tools/verify_sync.sh               # 收尾核对
+```
 
-# 只改了 module/ 里的东西时，必须重打 zip 并覆盖 Release 附件
+`tools/verify_sync.sh` 查**两件事**：
+
+1. 本地 vs git 远端逐文件 sha（看有没有漏推）
+2. **Release 附件新鲜度** —— 按 `module/module.prop` 里的 `version` 找到对应 tag 的 Release，
+   下载附件，和本地 `module/` **逐文件比内容**
+   （比内容不比 zip 字节：zip 的条目顺序随文件系统 readdir 变，同一份 module/ 在仓库里和
+   复制到 `/tmp` 后打出的 sha256 不同 —— 第一版比字节会误报。）
+
+退出码：`0` 全一致 / `2` git 树不一致 / `3` Release 附件过期或取不到。
+
+> v1.2.3 出过一次「脚本推上去了，Release 里的 zip 还是旧的」——
+> 当时 verify_sync 只看 git 树，看不出来；第 2 项检查就是为此加的。
+
+### 发新版本（`module/` 内容有改动时才需要）
+
+```bash
+# 1) 改 module/module.prop 的 version 与 versionCode
+# 2) 同步文档里的版本号：CHANGELOG（把「未发布」改成新版本号）、README 的模块安装示例、
+#    本文件第「一、面板访问」上方的版本行，并新增 docs/release-notes-<新版本>.md
+# 3) 提交推送
+git add -A && git commit -m "切 v<新版本>：..." && git push origin main
+
+# 4) 打 zip（版本号从 module.prop 读，脚本会自检 zip 里的 module.prop 对不对）
 bash tools/build_module_zip.sh
-gh release upload v1.2.4 _dist/qiyuntai_btpanel-v1.2.4.zip --clobber
 
-# 检查本地和远端有没有漏推
+# 5) 建 tag + Release + 传附件
+git tag -a v<新版本> -m "栖云台 · 宝塔面板 v<新版本>" && git push origin v<新版本>
+gh release create v<新版本> -R moliapiyyds/qiyuntai-btpanel \
+    --title "栖云台 · 宝塔面板 v<新版本>" \
+    --notes-file "<docs/release-notes-<新版本>.md 的 Windows 路径>" --target main
+gh release upload v<新版本> _dist/qiyuntai_btpanel-v<新版本>.zip -R moliapiyyds/qiyuntai-btpanel --clobber
+
+# 6) 收尾核对（会去查新 Release 的附件）
 bash tools/verify_sync.sh
 ```
 
-> 注意：`tools/verify_sync.sh` 只比「本地 vs git 远端」，
-> **不会告诉你 Release 附件过期了** —— 所以只要动了 `module/`，就一定要重打 zip 并覆盖附件。
-> （v1.2.3 出过一次这种：脚本推上去了，Release 里的 zip 还是旧的。）
+> **两个坑**：
+> * `gh.exe` 是 Windows 程序，**不认 WSL 的 `/mnt/...` 路径** —— 传文件给它要先 `wslpath -w`。
+> * 上了新版本之后，**旧 Release 的附件要保持是它那个 tag 的源码内容**。
+>   切版本时如果发现旧的附件是「用新内容打的」（附件和 tag 对不上），
+>   用 `git worktree add /tmp/v<旧版本> <旧tag>` 把旧源码检出来重打一次再覆盖。
+>   v1.2.3 → v1.2.4 这次就这么处理的。
 
 ---
 
