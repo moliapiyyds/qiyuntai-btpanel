@@ -20,18 +20,18 @@
 # 这里用 expect 分配一个 pty，于是：
 #   1) 提示会真的打印出来（pty 下 read -p 才输出）
 #   2) 按**提示内容**决定答 y 还是 yes，与提问顺序无关
-#   3) 出现不认识的提示 -> 立刻失败退出，而不是乱答一个
-#      （这是故意的：宁可停下来让人看一眼，也不要把答案喂到错的提示上）
+#   3) 出现不认识的提示 -> 卡住 -> 「静默 45 秒 + 停在冒号上」两关都过 -> 失败退出
+#      （故意不在"看到冒号结尾"时就猜：见下面 timeout 分支里的说明）
 #
 # 用法：
 #   /usr/bin/expect -f bt-panel-install.exp /root/install_panel.sh
 # 退出码：
 #   0  安装器正常结束
-#   3  遇到无法识别的提问（拒绝盲目作答）
-#   4  长时间无输出，疑似卡死
+#   3  保留（当前逻辑不再主动返回，见下面的说明）
+#   4  长时间无已知提示、无输出 —— 疑似卡在不认识的提问上
 # ============================================================
 
-set timeout 1800
+set timeout 45
 set installer [lindex $argv 0]
 if {$installer eq ""} { set installer "/root/install_panel.sh" }
 set transcript "/tmp/qyt_panel_install.log"
@@ -47,6 +47,7 @@ puts "\[驱动\] 完整记录    : $transcript"
 puts "\[驱动\] 应答方式    : 按提示内容判断（不依赖提问顺序）"
 puts ""
 
+set stalls 0
 spawn /bin/bash $installer
 
 expect {
@@ -64,24 +65,52 @@ expect {
         exp_continue
     }
 
-    # ---- 不认识的提问：短行 + 以冒号结尾，像是提示符 ----
-    -re {[^\r\n]{1,80}[：:]\s*$} {
-        set bad $expect_out(0,string)
-        puts "\n\[驱动\]\[失败\] 遇到无法识别的提问，拒绝盲目作答："
-        puts "        > $bad"
-        puts ""
-        puts "        怎么处理："
-        puts "          1) 人工跑一次  bash $installer  看它到底问什么"
-        puts "          2) 把这个提示该答什么，加进本文件的 expect 分支"
-        puts "          3) 核验后重跑安装"
-        puts "        完整记录见 $transcript"
-        exit 3
-    }
-
+    # ---- 静默超时：可能正卡在一个我们不认识的提问上 ----
+    #
+    # 为什么不用「短行 + 冒号结尾」去猜未识别的提问（上一版就是这么写的，实测误判）：
+    # expect 的 `$` 匹配的是**缓冲区末尾**，不是行尾。而 bash 的 read -p 提示是不带
+    # 换行的，所以「一个完整的提示」和「半个正在到达的行」在缓冲区里长得一模一样。
+    # 实测撞上的是安装器的第一行输出：
+    #     cat: /etc/hostname: No such file or directory
+    # 它被分块投递，缓冲区恰好停在 "cat: "，于是被当成提示，直接误判失败。
+    #
+    # 现在改成：只认已知提示；其余情况靠"长时间完全没输出"来判定卡住。
+    # 判定卡住时把日志尾部打出来，人工一眼就能看到它停在哪个提问上。
     timeout {
-        puts "\n\[驱动\]\[失败\] 超过 $timeout 秒没有任何输出，安装器疑似卡住。"
-        puts "        完整记录见 $transcript"
-        exit 4
+        # 两级判定：光"静默"或光"冒号结尾"都不够，两个同时成立才算卡住。
+        #   - 半个正在到达的行：毫秒内就有后续输出，"静默"这一关会把它筛掉
+        #   - 安静干活（解压 / 安装）：没有冒号结尾，"末行形状"这一关会把它筛掉
+        incr stalls
+        # 注意：不能读 $expect_out(buffer) —— expect 只在**匹配成功**后才设置 expect_out，
+        # 超时的时候它根本不存在，会直接报 can't read "expect_out(buffer)"（实测踩到）。
+        # 所以改成从 log_file 记的日志里取尾部。
+        set tail ""
+        if {[file exists $transcript]} {
+            set f [open $transcript r]
+            set data [read $f]
+            close $f
+            set tail [string range $data end-400 end]
+        }
+        if {[regexp {[^\r\n]{1,200}[：:][ \t]*$} $tail]} {
+            puts "\n\[驱动\]\[失败\] 已经 $timeout 秒没有新输出，而最后停在冒号上 ——"
+            puts "        安装器很可能正卡在一个我们不认识的提问上。最后一行："
+            puts "          | [string range $tail end-160 end]"
+            puts ""
+            puts "        为什么不能自动猜：bash 的 read -p 提示不带换行，"
+            puts "        expect 的 \$ 匹配的是缓冲区末尾而不是行尾，"
+            puts "        「完整提示」和「半个到达中的行」在缓冲区里长得一样。"
+            puts "        怎么处理：人工跑一次  bash $installer  看它问什么，"
+            puts "        再把该答什么加进本文件的 expect 分支，然后重跑安装。"
+            puts "        完整记录见 $transcript"
+            exit 3
+        }
+        # 只是安静干活。累计静默超过 30 分钟就兜底失败。
+        if {$stalls * $timeout > 1800} {
+            puts "\n\[驱动\]\[失败\] 累计静默超过 30 分钟，安装器疑似卡死。"
+            puts "        完整记录见 $transcript"
+            exit 4
+        }
+        exp_continue
     }
 
     eof { }

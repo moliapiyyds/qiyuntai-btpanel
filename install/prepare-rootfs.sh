@@ -357,6 +357,12 @@ say "已写 DNS：/etc/resolv.conf"
 if ! grep -q '^inet:x:3003:' "$ROOT/etc/group" 2>/dev/null; then
     echo 'inet:x:3003:' >> "$ROOT/etc/group"
     say "已补 inet 组（Android paranoid-network 要求，缺了 mysqld/redis 会 bind 失败）"
+# 补 /etc/hostname：docker 基础镜像里没有这个文件，宝塔安装器一上来就
+#   cat: /etc/hostname: No such file or directory
+# 虽然无害，但会让日志第一行就是红字，也干扰排查。
+if [ ! -s "$ROOT/etc/hostname" ]; then
+    echo "openeuler" > "$ROOT/etc/hostname" 2>/dev/null && say "已补 /etc/hostname"
+fi
 fi
 
 # ---------- 验证 ----------
