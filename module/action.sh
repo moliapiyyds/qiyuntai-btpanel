@@ -123,15 +123,15 @@ diag() {
     G=$(in_chroot 'grep -c "^inet:x:3003:" /etc/group 2>/dev/null' 2>/dev/null | tr -d '\r')
     if [ "$G" = "1" ]; then
         echo "  OK  /etc/group 里有 inet:x:3003:"
-        for u in mysql redis www; do
+        for u in mysql redis memcached www; do
             if in_chroot "id -nG $u 2>/dev/null | tr ' ' '\n' | grep -qx inet" 2>/dev/null; then
-                printf "  OK  %-8s 在 inet 组\n" "$u"
+                printf "  OK  %-10s 在 inet 组\n" "$u"
             else
-                printf "  ！！%-8s 不在 inet 组  → mysqld/redis 会 bind 失败 (errno 13)\n" "$u"
+                printf "  ！！%-10s 不在 inet 组  → 它 bind TCP 会失败 (errno 13)\n" "$u"
             fi
         done
     else
-        echo "  ！！没有 inet:x:3003:  → 需要: echo 'inet:x:3003:' >> /etc/group && usermod -aG inet mysql redis"
+        echo "  ！！没有 inet:x:3003:  → 需要: echo 'inet:x:3003:' >> /etc/group && usermod -aG inet mysql redis memcached www"
     fi
 
     echo ""

@@ -160,12 +160,14 @@ start_svc() {
 
 # ---------- 4.5) Android paranoid-network 前置修正 ----------
 # 实测：Android 内核的 paranoid-network 只允许 root 或 AID_INET(gid 3003) 组进程
-# 创建 AF_INET socket。chroot 里的 mysql/redis 等服务账号默认不在该组，会启动失败：
+# 创建 AF_INET socket。chroot 里的 mysql/redis/memcached 等服务账号默认不在该组，
+# 会启动失败：
 #   mariadbd: "Failed to create a socket for IPv4 '0.0.0.0': errno: 13 / No TCP address could be bound to"
+#   memcached: 绑 127.0.0.1:11211 失败（init 脚本只会打印一句「启动失败」，没有任何 errno）
 # 这里开机兜底：补组 + 校正 MariaDB 数据目录属主（幂等）。
 if run_in "[ -f /etc/group ]"; then
     run_in "grep -q '^inet:' /etc/group || echo 'inet:x:3003:' >> /etc/group"
-    for u in mysql www redis; do
+    for u in mysql www redis memcached; do
         if run_in "id $u >/dev/null 2>&1"; then
             if ! run_in "id -nG $u 2>/dev/null | tr ' ' '\n' | grep -qx inet"; then
                 log "修正：把 $u 用户加入 inet(gid 3003) 组"
