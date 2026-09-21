@@ -142,15 +142,22 @@ if [ "$DO_CLEAN" = "1" ]; then
         "root/.cache:pip 等缓存" \
         ; do
         p="${d%%:*}"; why="${d#*:}"
+        # 双保险：路径为空、以 / 开头、或含 .. 就绝不动手。
+        # 为什么：`rm -rf "$ROOT/$p"` 在 $p 为空时会变成 `rm -rf "$ROOT/"`，
+        # 也就是把整个 chroot 删掉 —— 而本脚本是 root 跑的（shellcheck SC2115 报的就是这个）。
+        case "$p" in
+            ''|/*|*..*) die "内部错误：清理项路径异常：[${p}]" ;;
+        esac
         if [ -e "$ROOT/$p" ]; then
             SZ=$($BB du -sm "$ROOT/$p" 2>/dev/null | $BB cut -f1)
-            rm -rf "$ROOT/$p"
+            rm -rf "${ROOT:?}/${p:?}"
             printf '  删除 %-42s %6s MB  （%s）\n' "$p" "$SZ" "$why"
         fi
     done
     # 编译源码包：留着没用（重装会用镜像，不会再编译）
     for f in www/server/mysql/src.tar.gz www/server/mysql/mysql-*.tar.gz; do
-        [ -e "$ROOT/$f" ] && { SZ=$($BB du -sm "$ROOT/$f" 2>/dev/null | $BB cut -f1); rm -f "$ROOT/$f"; printf '  删除 %-42s %6s MB\n' "$f" "$SZ"; }
+        case "$f" in ''|/*|*..*) continue ;; esac
+        [ -e "$ROOT/$f" ] && { SZ=$($BB du -sm "$ROOT/$f" 2>/dev/null | $BB cut -f1); rm -f "${ROOT:?}/${f:?}"; printf '  删除 %-42s %6s MB\n' "$f" "$SZ"; }
     done
     # 面板的临时文件（保留 LinuxPanel-*.pl：那是官方包的哈希记录，是溯源证据）
     find "$ROOT/tmp" -maxdepth 1 -type f ! -name 'LinuxPanel-*' -exec rm -f {} + 2>/dev/null

@@ -62,6 +62,36 @@
   全部被拦下（基线正常通过）。
 * 顺带发现并修掉：`tools/__pycache__/*.pyc` 会被 `git add -A` 扫进版本库，已加 `.gitignore`。
 
+### 修掉「一键部署装出来的环境，和文档承诺的不是同一个」
+
+核对基线时发现的真问题，影响面比前面那些 bug 都大：
+
+* **`step_plugins` 只装 1 个插件，文档承诺 9 个**。
+  基线实测的插件清单是 `fail2ban / java_manager / jdk_manager / nodejs /
+  pyenv_manager / pythonmamager / redis / supervisor / tomcat2`，而脚本里只有
+  `plugin_install.py fail2ban` 一行。**旧环境里那 9 个是我当初手工装的，脚本从没同步。**
+  后果：别人照 README 跑 `deploy.ps1`，拿到的是缺 redis / tomcat / supervisor / nodejs /
+  JDK 的残缺环境；模块 `service.sh` 去拉起那 11 项服务时，缺的会被一项一项「跳过」，
+  而**任何地方都不报错**，文档却写着都有。
+  现在 `PLUGINS` 列全 9 个，逐条幂等（已存在就跳过）+ 逐条报结果，
+  最后有缺失就 `fail`（不静默放过）。
+* **`step_deps` 没装 redis / memcached**。现在补上一条独立的、允许失败的 dnf 兜底。
+  注意版本差异：openEuler 源里是 `redis 7.2.15` / `memcached 1.6.22`，
+  而基线记的是 `7.2.16` / `1.6.45` —— 说明旧环境那两份是面板插件自带的，
+  dnf 只是兜底。
+* **`deploy.ps1` 没推 `tools/`**。而 `step_plugins` 要 `tools/plugin_install.py`、
+  `step_patch` 要 `tools/moli_patch.py` —— 缺了这两个步骤必然失败
+  （实测 `/sdcard/tools` 存在但文件数 0）。现在推 `tools/`，并加了两个文件的落地检查。
+
+### 修掉 `make_image.sh` 里一个会删掉整个 chroot 的写法
+
+shellcheck 报的 SC2115：`rm -rf "$ROOT/$p"` 在 `$p` 为空时会展开成 `rm -rf "$ROOT/"`，
+而本脚本是 root 跑的。现在清理项的路径为空 / 以 `/` 开头 / 含 `..` 就直接 `die`，
+并且写成 `rm -rf "${ROOT:?}/${p:?}"` 双保险。
+
+（这条是 **GitHub Actions 抓到并发了邮件**的 —— 本地 `tools/ci.sh` 同一个检查也报，
+顺手就修了。CI 值回票价。）
+
 ### 预制镜像（`--from-image`）：不再依赖宝塔服务器
 
 起因：从零装要碰一堆宝塔端点（安装器 / `panel6.zip` / pyenv bundle / 组件脚本 / 组件源码），

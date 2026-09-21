@@ -139,15 +139,26 @@ if ($Check) {
 # ---------- 4) 推文件 ----------
 Write-Host ""
 Write-Host "---- 推送到手机 ----"
-RemoteRun "mkdir -p /sdcard/install /sdcard/module" | Out-Null
+RemoteRun "mkdir -p /sdcard/install /sdcard/module /sdcard/tools" | Out-Null
 & $Adb -s $serial push (Join-Path $RepoRoot 'install\.') /sdcard/install/ 2>&1 | Select-Object -Last 1
 & $Adb -s $serial push (Join-Path $RepoRoot 'module\.')  /sdcard/module/  2>&1 | Select-Object -Last 1
-RemoteRun "chmod 755 /sdcard/install/*.sh /sdcard/module/*.sh" | Out-Null
+# tools/ 也必须推：install/qiyuntai-install.sh 的 step_plugins 要用
+# tools/plugin_install.py、step_patch 要用 tools/moli_patch.py。
+# 以前没推 tools/，那两步会因为找不到文件而失败（而且 step_plugins 原来只装 fail2ban，
+# 失败还可能被忽略过去）。实测 /sdcard/tools 之前是空的。
+& $Adb -s $serial push (Join-Path $RepoRoot 'tools\.')   /sdcard/tools/   2>&1 | Select-Object -Last 1
+RemoteRun "chmod 755 /sdcard/install/*.sh /sdcard/module/*.sh /sdcard/tools/*.sh" | Out-Null
 # 数文件个数在 PowerShell 这边做：命令里写 $(...) 会被 PS 本地展开，传不过去
 $nIns = @((RemoteRun "ls /sdcard/install") | Where-Object { $_ -and $_.Trim() }).Count
 $nMod = @((RemoteRun "ls /sdcard/module")  | Where-Object { $_ -and $_.Trim() }).Count
-Ok "已推送：install/ $nIns 个文件，module/ $nMod 个文件（并已置执行位）"
-if ($nIns -lt 5 -or $nMod -lt 5) { Die "推送数量不对，检查 adb push 输出" }
+$nTool = @((RemoteRun "ls /sdcard/tools")  | Where-Object { $_ -and $_.Trim() }).Count
+Ok "已推送：install/ $nIns 个，module/ $nMod 个，tools/ $nTool 个（并已置执行位）"
+if ($nIns -lt 5 -or $nMod -lt 5 -or $nTool -lt 3) { Die "推送数量不对，检查 adb push 输出" }
+# 缺这两个，step_plugins / step_patch 必然失败，早报比晚报好
+foreach ($need in @('plugin_install.py', 'moli_patch.py')) {
+    $r = RemoteRun "test -f /sdcard/tools/$need && echo yes || echo no"
+    if (($r | Out-String) -notmatch 'yes') { Die "手机上缺 /sdcard/tools/$need —— step_plugins/step_patch 会失败" }
+}
 
 if ($PushOnly) {
     Write-Host ""

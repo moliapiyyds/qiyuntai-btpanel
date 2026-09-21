@@ -125,6 +125,18 @@ step_deps() {
       glib2 glib2-devel libstdc++ libstdc++-devel perl perl-devel perl-Data-Dumper \
       vim-minimal which sudo procps-ng iproute iptables-services rsync git ca-certificates e2fsprogs e2fsprogs-devel \
       expect'
+    # 运行时组件（不是编译依赖）：宝塔的 redis / memcached 插件要用这两个二进制。
+    # 单独一条、允许失败 —— 免得某个包名在别的 openEuler 版本里不存在，把上面
+    # 那条大的 dnf 事务一起搞挂。
+    # 注意版本差异（实测）：openEuler 源里是 redis 7.2.15 / memcached 1.6.22，
+    # 而本机基线记的是 7.2.16 / 1.6.45 —— 说明旧环境那份是面板插件自带的。
+    # 所以这里只是兜底，真正的来源是 step_plugins 里的插件。
+    if in_chroot 'dnf install --skip-broken -y redis memcached' >/dev/null 2>&1; then
+        log "已装 redis / memcached（dnf 兜底）"
+    else
+        warn "redis / memcached 的 dnf 安装没成功（面板插件可能会自带，继续）"
+    fi
+
     in_chroot 'id www >/dev/null 2>&1 || { NOLOGIN=/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/usr/sbin/nologin; [ -x $NOLOGIN ] || NOLOGIN=/bin/false; groupadd www; useradd -s $NOLOGIN -g www www; }'
     # 关键：写 bt_lib 锁，跳过宝塔原版 lib.sh 里上百个 yum 包 + openssl/mcrypt 源码编译
     echo "true" > "$ROOT/etc/bt_lib.lock"
@@ -281,10 +293,38 @@ step_components() {
     log "组件安装命令已执行（结果见各自输出）"
 }
 
+# 宝塔插件清单 —— 必须和 README.md / module/README.md 里承诺的一致。
+#
+# 【踩过的坑，2026-09-21 核对基线时发现】
+#   这里原来只装 fail2ban 一个，而文档写的是 9 个。结果是：
+#   一键部署装出来的环境跟"标准环境"根本不是同一个 —— 缺 redis / tomcat /
+#   supervisor / nodejs / JDK 这些插件，模块 service.sh 去拉起那 11 项服务时
+#   缺的会被一项一项"跳过"，而**没有任何地方会报错**。文档却写着都有。
+#   旧环境里那 9 个插件是我当初手工装的，脚本从来没同步。
+PLUGINS="fail2ban redis tomcat2 supervisor nodejs java_manager jdk_manager pyenv_manager pythonmamager"
+
 step_plugins() {
-    log "安装宝塔插件：Fail2ban（免登录，走官方下载接口）"
+    log "安装宝塔插件（免登录，走官方下载接口）"
     cp -f "$REPO_DIR/tools/plugin_install.py" "$ROOT/tmp/plugin_install.py"
-    in_chroot '/www/server/panel/pyenv/bin/python3 /tmp/plugin_install.py fail2ban'
+    local bad="" n=0
+    for p in $PLUGINS; do
+        # 幂等：已经装了就不重复下（image 路径下会走到这里，插件通常在镜像里了）
+        if [ -d "$ROOT/www/server/panel/plugin/$p" ]; then
+            log "  $p：已存在，跳过"
+            n=$((n + 1))
+            continue
+        fi
+        if in_chroot "/www/server/panel/pyenv/bin/python3 /tmp/plugin_install.py $p" >/dev/null 2>&1; then
+            log "  $p：装好"
+            n=$((n + 1))
+        else
+            warn "  $p：没装上"
+            bad="$bad $p"
+        fi
+    done
+    log "插件步骤完成：$n/$(printf '%s\n' $PLUGINS | wc -l) 个在位"
+    # 缺插件就失败，不要静默放过 —— 文档承诺它们都在，缺了就不是同一个环境
+    [ -z "$bad" ] || fail "这些插件没装上：$bad"
 }
 
 # ---------------- 6) 补丁 + 兼容层 ----------------
