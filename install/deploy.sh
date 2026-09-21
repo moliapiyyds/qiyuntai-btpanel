@@ -219,6 +219,10 @@ fi
 # ---------- 3) 铺 rootfs ----------
 echo
 echo "---- 铺 openEuler rootfs ----"
+# 注意：prepare-rootfs.sh 自己不知道要装哪个文件，**必须给它源**，
+# 否则它会以「没给源。用 --url / --xz / --tar 之一」退出，一键部署就卡在这。
+# 默认那条以前只传了 --root（2026-09-21 实测复现），现在改传 --mirror，
+# 由它自己用探好的下载器去镜像目录挑文件（且带多源回退，见 prepare-rootfs.sh）。
 if [ -d "$ROOT/www/server/panel" ]; then
     ok "检测到已有面板环境（$ROOT），跳过 rootfs"
 elif [ -n "$ROOTFS_URL" ]; then
@@ -226,7 +230,7 @@ elif [ -n "$ROOTFS_URL" ]; then
 elif [ -n "$ROOTFS_TAR" ]; then
     sh "$REPO/install/prepare-rootfs.sh" --root "$ROOT" --tar "$ROOTFS_TAR" || die "rootfs 准备失败"
 else
-    sh "$REPO/install/prepare-rootfs.sh" --root "$ROOT" || die "rootfs 准备失败"
+    sh "$REPO/install/prepare-rootfs.sh" --root "$ROOT" --mirror || die "rootfs 准备失败"
 fi
 
 # ---------- 4) 装面板 + 组件 + 插件 + 补丁 + 模块 ----------
