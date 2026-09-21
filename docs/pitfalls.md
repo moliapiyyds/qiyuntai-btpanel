@@ -527,3 +527,27 @@ dmesg | grep 'name="null"'
 `ps -A -o NAME | grep zygote` 并顺手 `2>/dev/null`，输出为空还 grep 不到，
 于是误报"系统进程 0 个、系统没起来"。实际系统是好的。
 **查进程要么用 `comm`/`args`，要么直接扫 `/proc/<pid>/cmdline`；并且别把 stderr 丢掉。**
+
+### 5. 同一个 `pgrep`，宿主和 chroot 里是两个东西（差点误判自己的代码）
+
+排查 sshd 时我写了个探针，在**宿主**上跑 `/data/adb/ksu/bin/busybox pgrep -x sshd`：
+sshd 明明在跑（`ps` 看得到、`:22` 在听），它却返回空。差点据此判定
+`module/service.sh` 里那两句 `pgrep -x sshd` 是坏的（会让日志打出
+「警告：sshd 启动失败」、而且每次开机再拉一个 sshd）。
+
+实测下来是**工具差异**，不是代码问题：
+
+| 谁 | `-x` 比什么 | `pgrep -x sshd` 在 sshd 运行时 |
+|---|---|---|
+| 宿主 busybox（`/data/adb/ksu/bin/busybox`） | cmdline/argv[0] | **空**（sshd 把 proctitle 改成了 `sshd: /usr/sbin/sshd -f … [listener] …`） |
+| chroot 内 procps-ng 4.0.4（`/usr/bin/pgrep`） | `/proc/pid/comm` | **返回 pid**（comm 就是 `sshd`） |
+
+模块里跑的是后者（`run_in` → `chroot … /bin/bash -c`），所以代码本来就是对的。
+同一个探针要测「模块里那行代码」，就得放进 chroot 里跑。
+
+另外 `pgrep -f <名字>` 会把**探针自己**匹配上（脚本名/命令行里就含那个字符串），
+实测踩过两次：`pgrep -f sshd` 把 `qyt_sshd_probe2.sh` 自己也列了出来，
+`ic "pgrep -f 'fail2ban-server'"` 把承载它的 `bash -c` 列了出来。
+要么用 `-x`，要么拿到 pid 后再滤掉 cmdline 里带 `pgrep` 的。
+
+**教训**：工具链对不上时先怀疑工具，再怀疑结论 —— 写进 `tools/audit_env.sh` 的注释里了。
