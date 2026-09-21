@@ -68,15 +68,48 @@ else
 fi
 
 hr "2) 11 项服务：init 脚本 / 进程 / 端口"
-# service.sh 要拉起的东西，一个都不能少
-for s in bt nginx mysqld php-fpm-82 fail2ban crond redis memcached tomcat; do
-    [ -e "$ROOT/etc/init.d/$s" ] && I="init✓" || I="init✗"
-    $BB pgrep -f "$s" >/dev/null 2>&1 && P="进程✓" || P="进程✗"
-    printf '  %-12s %s %s\n' "$s" "$I" "$P"
+# 进程判定一律用 **chroot 里的 procps-ng pgrep -x**（和 module/action.sh 的 diag 一致）。
+# 为什么不用宿主的 busybox pgrep：两者的匹配对象不同 ——
+#   procps-ng 4.0.4 的 `pgrep -x` 比的是 /proc/pid/comm（内核里的进程名）；
+#   宿主 busybox 的 `pgrep -x` 比的是 cmdline/argv[0]。
+# 而 nginx / sshd 这类守护进程会改写自己的进程标题（sshd 的等价 argv[0] 变成
+# "sshd: /usr/sbin/sshd -f /etc/ssh/sshd_config_moli [listener] …"），
+# 于是宿主 busybox `pgrep -x sshd` 明明 sshd 在跑却返回空 —— 实测踩过，
+# 差点误判成「service.sh 的 sshd 检测是坏的」。
+# 也不要用 `pgrep -f <名字>`：会把审计脚本自己的命令行也匹配上
+# （脚本名里带 sshd 就会自匹配），这是实测到的假阳性。
+# 取 pid：`pgrep -f <模式>` 会把 ic 自己那个 `bash -c "pgrep -f '<模式>'"` 也匹配上
+#（它的 cmdline 里就含这个模式串），所以拿到候选后要把「cmdline 里带 pgrep 的」剔掉。
+# 这是实测到的第二个假阳性来源。
+proc_pid() {
+    ic "pgrep -f '$1' 2>/dev/null | while read -r p; do
+            c=\$(cat /proc/\$p/cmdline 2>/dev/null | tr '\\0' ' ')
+            [ -n \"\$c\" ] || continue
+            case \"\$c\" in *pgrep*) continue ;; esac
+            echo \$p; break
+        done" | tr -d '\r' | grep -E '^[0-9]+$'
+}
+proc_of() {
+    case "$1" in
+        # 这几个的 comm 不是服务名（面板是 python3、fail2ban-server 也是 python3、
+        # tomcat 是 java），只能用 -f 匹配 cmdline 里的特征串
+        bt)        proc_pid 'BT-Panel' ;;
+        fail2ban)  proc_pid 'fail2ban-server' ;;
+        tomcat)    proc_pid 'catalina.base=/www/server/tomcat' ;;
+        mysqld)    ic 'pgrep -x mariadbd | head -1' ;;
+        php-fpm-82) ic 'pgrep -x php-fpm | head -1' ;;
+        *)         ic "pgrep -x $1 | head -1" ;;
+    esac
+}
+for s in bt nginx mysqld php-fpm-82 fail2ban crond redis memcached tomcat supervisord sshd; do
+    case "$s" in
+        supervisord|sshd) I="（无 init 脚本）" ;;
+        *) [ -e "$ROOT/etc/init.d/$s" ] && I="init✓" || I="init✗" ;;
+    esac
+    pid=$(proc_of "$s" | tr -d '\r')
+    [ -n "$pid" ] && P="进程✓ pid=$pid" || P="进程✗"
+    printf '  %-12s %-14s %s\n' "$s" "$I" "$P"
 done
-# 这两个不是 init 脚本拉起来的
-$BB pgrep -x supervisord >/dev/null 2>&1 && echo "  supervisord  进程✓（插件自带，无 init 脚本）" || echo "  supervisord  进程✗"
-$BB pgrep -x sshd >/dev/null 2>&1 && echo "  sshd         进程✓（兜底通道，靠 /etc/ssh/sshd_config_moli）" || echo "  sshd         进程✗"
 
 echo "  端口监听："
 $BB netstat -ltn 2>/dev/null | $BB grep -E ':(22|80|888|3306|6379|11211|8080|8005|8888) ' | while read -r line; do

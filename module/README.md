@@ -155,11 +155,11 @@ bt 6      # 修改面板入口
 | PHP | **8.2** | `/www/server/php/82`，php-fpm |
 | phpMyAdmin | **5.2** | `/www/server/phpmyadmin` |
 | Fail2ban | 插件 **2.6**（内含 fail2ban **1.1.1.dev1**） | 已实测可封禁/解封 IP |
-| 管理插件 | 共 **9 个**：`fail2ban` / `redis` / `tomcat2` / `supervisor` / `nodejs` / `java_manager` / `jdk_manager` / `pyenv_manager` / `pythonmamager` | 走宝塔插件下载接口装的（`tools/plugin_install.py`），面板「软件商店 → 已安装」里能正常显示、能启停。上面表里的 Redis / Tomcat / Supervisor / Node.js / JDK 都是这三个插件提供的，不是 dnf 装的 |
-| Redis | **7.2.16** | dnf 安装，开机自动拉起 |
+| 管理插件 | 共 **9 个**：`fail2ban` / `redis` / `tomcat2` / `supervisor` / `nodejs` / `java_manager` / `jdk_manager` / `pyenv_manager` / `pythonmamager` | 走宝塔插件下载接口装的（`tools/plugin_install.py`），面板「软件商店 → 已安装」里能正常显示、能启停。上面表里的 Redis / Tomcat / Supervisor / Node.js / JDK 都是这些插件提供的，不是 dnf 装的 |
+| Redis | **7.2.16** | 由 `redis` 插件装到 `/www/server/redis`（dnf 源里那份是 7.2.15，装了也是兜底，不跑） |
 | Tomcat | **9.0** | 插件 `tomcat2` |
 | Supervisor | **4.2.4** | 进程守护管理器 |
-| Memcached | **1.6.45** | 开机自动拉起 |
+| Memcached | **1.6.45** | 宝塔源码包编到 `/usr/local/memcached`（面板判断它装没装就是看这个路径）；dnf 源里那份 1.6.22 只在编不出来时兜底 |
 | Python | **3.13.14**（面板 pyenv）+ 系统 python3 + pip/venv | |
 | Java | OpenJDK **17.0.20.8 / 11.0.32.9 / 1.8.0_502**（默认 `java` 是 8，默认 `javac` 是 17） | |
 | Node.js | **v20.18.3**（宝塔管理器内置）/ **v20.18.2**（系统 `node`）+ npm **10.8.2** | |
@@ -188,7 +188,7 @@ bt 6      # 修改面板入口
 # 进 chroot
 chroot /data/openeuler /bin/bash
 
-# 服务管理（chroot 内）—— 11 项，和开机拉起的同一套
+# 服务管理（chroot 内）—— 11 项里这 9 项走 init.d，supervisord 和 sshd 不是（见下）
 /etc/init.d/bt start|stop|restart
 /etc/init.d/nginx start|stop|restart
 /etc/init.d/mysqld start|stop|restart
@@ -198,6 +198,10 @@ chroot /data/openeuler /bin/bash
 /etc/init.d/redis start|stop|restart
 /etc/init.d/memcached start|stop|restart
 /etc/init.d/tomcat start|stop|restart
+
+# 另外两项不走 init.d：
+#   supervisord ← /www/server/panel/pyenv/bin/supervisord -c /etc/supervisor/supervisord.conf
+#   sshd        ← /usr/sbin/sshd -f /etc/ssh/sshd_config_moli（监听 :22，adb 不通时的救命通道）
 
 # 也可以直接用兼容层
 systemctl restart nginx
@@ -217,11 +221,16 @@ ps -ef | grep -E "BT-Panel|BT-Task|nginx|mariadbd|php-fpm|fail2ban|redis|memcach
 在 KernelSU 管理器里卸载本模块，或者手动：
 
 ```sh
-sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh
+sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh            # 只停服务 + 解挂载
+sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh --purge    # 连 /data/openeuler 一起删
 ```
 
-* 卸载脚本**只停服务 + 解挂载**，`/data/openeuler` 原样保留。
-* 想彻底清理：`rm -rf /data/openeuler`（**确认不再需要里面的网站/数据库再执行**）。
+* 不带参数：**只停服务 + 解挂载**，`/data/openeuler` 原样保留（网站、数据库、配置都在）。
+* 想彻底清理用 `--purge`。**不要直接 `rm -rf /data/openeuler`** —— chroot 的
+  `dev` / `proc` / `sys` 是 `mount --bind` 进来的，带着挂载 `rm -rf` 会顺着 bind
+  把宿主机的 `/dev` 删掉（这个坑踩过两次，最惨一次开机黑屏、靠 `mknod` 重建
+  `/dev` 里的设备节点 + `echo b > /proc/sysrq-trigger` 才救回来）。
+  `--purge` 会先解挂、断言挂载数为 0，确认干净了才删。
 
 ---
 
