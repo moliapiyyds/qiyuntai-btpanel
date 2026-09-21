@@ -109,7 +109,7 @@ adb shell "su -c '/data/adb/ksud module install /data/local/tmp/qiyuntai_btpanel
 
 | 文件 | 大小 | sha256 |
 |---|---|---|
-| `qiyuntai_btpanel-v1.2.6.zip`（模块） | 见 Release | 见下方说明 |
+| `qiyuntai_btpanel-v1.2.6.zip`（模块） | 20,787 B | `a9b1ee0029fdf3d3237622775578c635d712d68c1ff65a58f0ac103a06ad60eb` |
 | `qyt-image.part-aaa` | 1,992,294,400 B | `e113c6653c81a764b8bc84ad3be9a8e1ee66377f0f59266b111a1358820a4130` |
 | `qyt-image.part-aab` | 235,001,052 B | `672b6bab1a9b8dcd31dff35a6f66bfa8be8c65827e454eb26dc403059e6f7ee2` |
 | 整包（两卷拼起来） | 2,227,295,452 B | `9f846cfa1ded8767d0b7e33722eb7546b7db08a8ddc70604fca60e04e7d4e284` |
