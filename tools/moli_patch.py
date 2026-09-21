@@ -27,6 +27,16 @@
     /etc/init.d/bt restart
 
 备份：/www/server/panel/moli_patch/backup_<时间戳>/   回滚＝把同名文件复制回原路径后重启面板
+
+【三道守卫】（2026-09-21 加，起因：这个补丁原来没有版本判断，是纯模式匹配）
+  1) 面板版本守卫：只在本文件 PANEL_VERIFIED 里列出的版本上自动打；
+     别的版本直接失败并提示"要人工核验后加 --force"。
+     理由：补丁点会随宝塔版本漂移，静默打半个出来比彻底失败更坏。
+  2) 已打过就跳过：moli_patch/.patched 是标记。已存在且校验全通过时跳过，
+     免得在已打补丁的面板上重打 —— 那样会把"已打补丁的文件"备份成"原版"，
+     回滚点就假了。
+  3) 校验结果当门槛：do_verify() 统计未生效项，非 0 时本脚本退出码非 0，
+     部署脚本会因此失败，而不是继续往前跑。
 """
 import glob
 import os
@@ -38,6 +48,21 @@ import time
 
 PANEL = '/www/server/panel'
 TS = time.strftime('%Y%m%d_%H%M%S')
+
+# 本补丁实测适配过的面板版本。宝塔换版本时补丁点会漂移，所以这里是白名单而不是宽松判断。
+PANEL_VERIFIED = ['13.0.0']
+# 补丁逻辑本身的修订号，写进标记文件用
+PATCH_REV = 'r1'
+MARKER = os.path.join(PANEL, 'moli_patch', '.patched')
+
+
+def panel_version():
+    """读面板版本。宝塔没有独立版本文件，只有 class/common.py 里的 g.version。"""
+    p = os.path.join(PANEL, 'class', 'common.py')
+    if not os.path.exists(p):
+        return ''
+    m = re.search(r"g\.version\s*=\s*['\"]([^'\"]+)['\"]", rd(p))
+    return m.group(1) if m else ''
 BK = os.path.join(PANEL, 'moli_patch', 'backup_' + TS)
 LOG = []
 
@@ -445,8 +470,11 @@ def do_verify():
         if os.path.exists(p) and 'MOLI_GATE' in rd(p):
             ngate += 1
     checks.append(('浏览器版本检测已关(%d 个页面)' % ngate, ngate > 0))
+    bad = 0
     for name, ok in checks:
         say('  %-28s %s' % (name, '正常' if ok else '未生效'))
+        if not ok:
+            bad += 1
     say('--- 语法复核 ---')
     for rel in ('class/panelPlugin.py', 'BTPanel/__init__.py',
                 'class/panelModel/publicModel.py', 'class/panelSSL.py'):
@@ -454,17 +482,49 @@ def do_verify():
         if os.path.exists(p):
             ok, err = py_ok_path(p)
             say('  %-38s %s' % (rel, 'OK' if ok else ('语法错误! ' + err)))
+            if not ok:
+                bad += 1
     say('=== 校验结束 ===')
+    # 返回「未生效项数」：调用方拿它当门槛。
+    # 为什么需要：打补丁是按「文件路径 + 函数名 + 代码片段」匹配的，
+    # 宝塔换版本时任何一处挪动都会让某几条**静默跳过**（原来只打一行 [跳过] 就继续），
+    # 结果是装出个四不像（比如企业版显出来了、但关闭更新没生效）。
+    return bad
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == 'verify':
-        do_verify()
-        return
+    args = sys.argv[1:]
+    if args and args[0] == 'verify':
+        return do_verify()
+    force = '--force' in args
+
     say('=== 栖云台面板补丁 开始 %s ===' % time.strftime('%Y-%m-%d %H:%M:%S'))
     if not os.path.isdir(PANEL):
         say('[失败] 找不到 %s' % PANEL)
-        sys.exit(1)
+        return 1
+
+    # ---- 守卫 1：面板版本 ----
+    ver = panel_version()
+    say('面板版本：%s' % (ver or '（读不到）'))
+    if ver not in PANEL_VERIFIED and not force:
+        say('')
+        say('[失败] 本补丁只在本机实测适配过：%s' % ', '.join(PANEL_VERIFIED))
+        say('        当前面板是「%s」。' % (ver or '未知'))
+        say('        为什么不自动继续：补丁按「文件路径 + 函数名 + 代码片段」打，')
+        say('        宝塔换版本时任何一处挪动都会让某几条**静默失效**，')
+        say('        装出来是个四不像（企业版显出来了、关闭更新却没生效）。')
+        say('        人工核验过再继续：加 --force')
+        return 2
+
+    # ---- 守卫 2：已打过就跳过 ----
+    if not force and os.path.exists(MARKER):
+        say('检测到已打过补丁的标记：%s' % MARKER)
+        bad = do_verify()
+        if bad == 0:
+            say('校验全部正常 —— 跳过重复打补丁（保持回滚点是原版）。要强制重打加 --force。')
+            return 0
+        say('但校验有 %d 项未生效，继续补打。' % bad)
+
     step_backend()
     step_noupdate()
     step_frontend()
@@ -472,8 +532,8 @@ def main():
     step_browser_gate()
     step_files()
     say('=== 备份目录：%s ===' % BK)
-    do_verify()
-    say('=== 完成，重启面板生效： /etc/init.d/bt restart ===')
+    bad = do_verify()
+
     try:
         os.makedirs(os.path.join(PANEL, 'moli_patch'), exist_ok=True)
         with open(os.path.join(PANEL, 'moli_patch', 'last_run.log'), 'w') as f:
@@ -481,6 +541,21 @@ def main():
     except Exception:
         pass
 
+    # ---- 守卫 3：未生效项当门槛 ----
+    if bad:
+        say('[失败] 有 %d 项补丁未生效（见上面标「未生效」的行）。' % bad)
+        say('        不会写"已打好"标记，部署脚本也会因此失败。')
+        return 3
+
+    try:
+        with open(MARKER, 'w') as f:
+            f.write('panel=%s\npatch=%s\ntime=%s\n'
+                    % (ver, PATCH_REV, time.strftime('%Y-%m-%d %H:%M:%S')))
+    except Exception:
+        pass
+    say('=== 完成，重启面板生效： /etc/init.d/bt restart ===')
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
