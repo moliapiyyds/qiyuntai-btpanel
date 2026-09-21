@@ -137,6 +137,15 @@ fi
 if [ "$DO_CLEAN" = "1" ]; then
     echo ""
     echo "---- 清理 $ROOT ----"
+    # 防呆（这一段会 rm -rf，值得多写几行）：--root 必须是「足够具体的目录」，
+    # 且不能是几个一删就要命的地方。别指望自己永远不手抖。
+    case "$ROOT" in
+        ''|/|/data|/data/adb|/data/local|/sdcard|/system|/storage|*..*)
+            die "拒绝执行：--root 给的路径不安全（[$ROOT]）—— 这一段会 rm -rf 它" ;;
+    esac
+    if [ "$(printf '%s' "$ROOT" | tr -cd '/' | wc -c)" -lt 2 ]; then
+        die "拒绝执行：--root 至少要具体到 /data/<名字> 这一层（当前 [$ROOT]）"
+    fi
     unmount_all
     LEFT=$(mount | grep -c "$ROOT/")
     if [ "$LEFT" != "0" ]; then
