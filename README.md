@@ -82,6 +82,10 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
   cat /data/openeuler/www/server/panel/data/admin_path.pl
   ```
 * **必须浏览器访问**：宝塔有反爬虫，`curl` 默认 UA 会被丢 404（面板自身行为，不是故障）。
+* **面板 SSL 默认关着**：bt 的「自动申请 IP 证书」任务会在装完后自动写 `data/ssl.pl=True`，
+  面板就只收 HTTPS，明文 `http://…` 连上会被 reset（不是 404）。部署脚本会把这个任务
+  空壳化并删掉 `ssl.pl`，所以上面写的是 `http://`；如果你自己在面板里开了 SSL，
+  就改用 `https://`（自签证书，浏览器会提示不安全）。
 * 随机化：端口/入口/用户名由宝塔安装器随机；**密码由 `install/qiyuntai-install.sh` 用 `openssl rand -hex 8` 生成 16 位随机**并写入凭据文件 → 不会出现"全网同一个密码"。
 
 ---
