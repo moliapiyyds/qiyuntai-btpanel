@@ -24,6 +24,8 @@
     chroot /data/openeuler /bin/bash
     /www/server/panel/pyenv/bin/python3 /path/to/moli_patch.py           # 打补丁
     /www/server/panel/pyenv/bin/python3 /path/to/moli_patch.py verify    # 只校验
+    /www/server/panel/pyenv/bin/python3 /path/to/moli_patch.py revert    # 从最新备份还原成原版
+                                                                        # （做预制镜像时必用）
     /etc/init.d/bt restart
 
 备份：/www/server/panel/moli_patch/backup_<时间戳>/   回滚＝把同名文件复制回原路径后重启面板
@@ -64,6 +66,59 @@ def panel_version():
     m = re.search(r"g\.version\s*=\s*['\"]([^'\"]+)['\"]", rd(p))
     return m.group(1) if m else ''
 BK = os.path.join(PANEL, 'moli_patch', 'backup_' + TS)
+
+
+def do_revert():
+    """从最新的 backup_* 目录还原成原版。
+
+    为什么需要：tools/make_image.sh 要冻一个**未打补丁**的镜像。
+    理由（重要）：
+      1) 补丁是版本相关的（PANEL_VERIFIED 是按实测版本写的），冻进镜像就没法在
+         不重建几个 GB 镜像的前提下更新补丁。
+      2) 部署时在原版上打补丁，backup_* 里才是真原版，回滚点才成立。
+      3) 补丁只改面板的 py/html/js，几秒钟的事。
+
+    注意：只还原被 backup() 记过的文件。补丁**新建**的少数数据文件
+    （如 data/initBind.pl 这类"已绑定"标记）不会被删 —— 它们是纯数据，
+    部署时会再写一遍，留着不影响。
+    """
+    mp = os.path.join(PANEL, 'moli_patch')
+    if not os.path.isdir(mp):
+        say('[失败] 找不到 %s —— 没有备份可还原' % mp)
+        return 1
+    dirs = sorted(glob.glob(os.path.join(mp, 'backup_*')))
+    if not dirs:
+        say('[失败] %s 下没有 backup_* 目录' % mp)
+        return 1
+    bk = dirs[-1]
+    say('用最新的备份目录还原：%s' % bk)
+    n = 0
+    skip = 0
+    for name in sorted(os.listdir(bk)):
+        src = os.path.join(bk, name)
+        if not os.path.isfile(src):
+            continue
+        rel = name.replace('__', '/')
+        dst = os.path.normpath(os.path.join(PANEL, rel))
+        # 防目录穿越：备份名是从相对路径拍平的，但还是校验一次
+        if not dst.startswith(PANEL + os.sep):
+            say('  [跳过] 路径越界：%s' % name)
+            skip += 1
+            continue
+        try:
+            shutil.copy2(src, dst)
+            n += 1
+        except Exception as e:
+            say('  [失败] 还原 %s：%s' % (rel, e))
+            skip += 1
+    say('已还原 %d 个文件%s' % (n, ('，跳过 %d 个' % skip) if skip else ''))
+    try:
+        os.remove(MARKER)
+        say('已删除补丁标记 %s' % MARKER)
+    except Exception:
+        pass
+    say('=== 已回退到原版。要再打补丁：不带参数跑一次本脚本 ===')
+    return 0
 LOG = []
 
 
@@ -496,6 +551,8 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == 'verify':
         return do_verify()
+    if args and args[0] == 'revert':
+        return do_revert()
     force = '--force' in args
 
     say('=== 栖云台面板补丁 开始 %s ===' % time.strftime('%Y-%m-%d %H:%M:%S'))

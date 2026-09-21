@@ -20,6 +20,9 @@
 #   --url <tar.xz>   rootfs 走指定 URL
 #   --tar <file>     rootfs 用本地已解压好的 docker tar
 #   --repo-tar <f>   仓库用本地已推过来的 tar.gz（不连 GitHub）
+#   --from-image <dir>  用预制镜像铺环境：目录里放 qyt-image.part-*（可分卷）
+#                       ---- 装一台只要 10 分钟，且完全不碰宝塔的服务器 ----
+#   --image-sha <sha>   额外指定镜像整包的 sha256（不给就用目录里的 SHA256SUMS.txt）
 #
 # 全程只写 /data/openeuler 与 /data/adb/modules，不动系统分区；
 # 卸载模块只解挂载，不删数据。
@@ -38,6 +41,8 @@ DO_REBOOT=1
 ROOTFS_URL=""
 ROOTFS_TAR=""
 REPO_TAR=""
+IMAGE_SRC=""
+IMAGE_SHA=""
 
 say()  { echo "  $*"; }
 ok()   { echo "  [OK]   $*"; }
@@ -53,6 +58,8 @@ while [ $# -gt 0 ]; do
         --url)       ROOTFS_URL="$2"; shift 2 ;;
         --tar)       ROOTFS_TAR="$2"; shift 2 ;;
         --repo-tar)  REPO_TAR="$2"; shift 2 ;;
+        --from-image) IMAGE_SRC="$2"; shift 2 ;;
+        --image-sha)  IMAGE_SHA="$2"; shift 2 ;;
         -h|--help)   sed -n '2,28p' "$0"; exit 0 ;;
         *) die "未知参数：$1（-h 看用法）" ;;
     esac
@@ -216,7 +223,48 @@ if [ "$DO_REPO_ONLY" = "1" ]; then
     exit 0
 fi
 
-# ---------- 3) 铺 rootfs ----------
+# ---------- 3) 铺环境：预制镜像 或 从零铺 rootfs ----------
+if [ -n "$IMAGE_SRC" ]; then
+    echo
+    echo "---- 用预制镜像铺环境 ----"
+    [ -d "$IMAGE_SRC" ] || die "--from-image 要给一个目录（里面放 qyt-image.part-*），当前是：$IMAGE_SRC"
+    NPART=$(ls "$IMAGE_SRC"/qyt-image.part-* 2>/dev/null | wc -l)
+    [ "$NPART" -gt 0 ] || die "$IMAGE_SRC 里找不到 qyt-image.part-*"
+    ok "找到 $NPART 个分卷"
+
+    # 目标必须干净：带着挂载 rm -rf 会把宿主真实 /dev 删掉（黑屏，实测踩过两次）
+    if [ -d "$ROOT" ] && [ -n "$(ls -A "$ROOT" 2>/dev/null)" ]; then
+        echo "  $ROOT 非空。先解挂载再清："
+        echo "    sh $REPO/install/prepare-rootfs.sh --clean"
+        die "拒绝在非空目录上解包镜像"
+    fi
+
+    ARCH=/data/qyt-image.tar.xz
+    say "拼接分卷 -> $ARCH"
+    cat "$IMAGE_SRC"/qyt-image.part-* > "$ARCH" || die "拼接失败"
+    ASZ=$(wc -c < "$ARCH" 2>/dev/null || echo 0)
+    say "镜像大小：$((ASZ / 1024 / 1024)) MB"
+
+    WANT="$IMAGE_SHA"
+    if [ -z "$WANT" ] && [ -f "$IMAGE_SRC/SHA256SUMS.txt" ]; then
+        WANT=$(sed -n '1s/^sha256  \([0-9a-f]\{64\}\) .*/\1/p' "$IMAGE_SRC/SHA256SUMS.txt")
+    fi
+    if [ -n "$WANT" ]; then
+        GOT=$($BB sha256sum "$ARCH" | cut -d' ' -f1)
+        [ "$WANT" = "$GOT" ] || die "镜像 sha256 不匹配（期望 $WANT，实得 $GOT）—— 拒绝解包"
+        ok "sha256 校验通过"
+    else
+        warn "没有可用的 sha256（既无 SHA256SUMS.txt 也没给 --image-sha），跳过校验"
+    fi
+
+    say "解包到 /data（约 1-3 分钟）"
+    $BB xz -dc "$ARCH" | $BB tar -x -C /data || die "解包失败"
+    [ -x "$ROOT/www/server/panel/BT-Panel" ] || die "解包完了但没找到 $ROOT/www/server/panel/BT-Panel"
+    # 留个标记：凭据那一步要据此重新随机化端口/入口/用户名
+    touch "$ROOT/.from-image"
+    ok "镜像已解包"
+    [ -f "$ROOT/IMAGE-MANIFEST.txt" ] && { echo "  --- 镜像清单 ---"; sed 's/^/    /' "$ROOT/IMAGE-MANIFEST.txt"; }
+else
 echo
 echo "---- 铺 openEuler rootfs ----"
 # 注意：prepare-rootfs.sh 自己不知道要装哪个文件，**必须给它源**，
@@ -232,12 +280,24 @@ elif [ -n "$ROOTFS_TAR" ]; then
 else
     sh "$REPO/install/prepare-rootfs.sh" --root "$ROOT" --mirror || die "rootfs 准备失败"
 fi
+fi
 
 # ---------- 4) 装面板 + 组件 + 插件 + 补丁 + 模块 ----------
 echo
-echo "---- 装面板 / 组件 / 插件 / 补丁 / 模块 ----"
-say "这一步最慢（dnf + 源码编译 OpenResty/MariaDB/PHP），MariaDB 峰值约 2 GB 内存"
-sh "$REPO/install/qiyuntai-install.sh" all || die "部署脚本失败（看上面日志）"
+if [ -n "$IMAGE_SRC" ]; then
+    echo "---- 镜像已就位：重新随机化身份 + 打补丁 + 装模块 ----"
+    say "面板与组件已经在镜像里编译好了，跳过 dnf 和源码编译"
+    # 注意顺序：先 creds（会重新随机化端口/入口/用户名），再 plugins/patch/module。
+    # 补丁最后打，是因为镜像里存的是**未打补丁的原版**（见 tools/make_image.sh 的说明）。
+    for st in creds plugins patch module; do
+        say "== 步骤：$st =="
+        sh "$REPO/install/qiyuntai-install.sh" "$st" || die "$st 步骤失败（看上面日志）"
+    done
+else
+    echo "---- 装面板 / 组件 / 插件 / 补丁 / 模块 ----"
+    say "这一步最慢（dnf + 源码编译 OpenResty/MariaDB/PHP），MariaDB 峰值约 2 GB 内存"
+    sh "$REPO/install/qiyuntai-install.sh" all || die "部署脚本失败（看上面日志）"
+fi
 
 # ---------- 5) 收尾 ----------
 echo

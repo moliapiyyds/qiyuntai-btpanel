@@ -189,6 +189,36 @@ step_credentials() {
     [ -d "$ROOT/www/server/panel" ] || { log "面板未安装，跳过凭据步骤"; return 1; }
     log "生成随机面板密码并写入凭据文件"
     local U P PORT PATHV IP
+
+    # ---- 来自预制镜像时，把所有「身份」重新随机化 ----
+    # 为什么必须做：预制镜像里烘的是打包那台机器的端口、安全入口、用户名。
+    # 不重新随机，所有用同一个镜像的人端口和入口路径就完全一样 ——
+    # 既违背 README 里「每台随机」的承诺，也让扫描器更容易一网打尽。
+    if [ -f "$ROOT/.from-image" ]; then
+        log "检测到来自预制镜像：重新随机化 端口 / 安全入口 / 用户名"
+        local NP NEWP NEWU i
+        NP=$(in_chroot 'openssl rand -hex 2' 2>/dev/null | tr -d '\r' | tail -1)
+        case "$NP" in ''|*[!0-9a-f]*) NP=$(printf '%x' $(( ($$ % 30000) + 20000 )));; esac
+        NP=$(( 0x$NP % 40000 + 20000 ))
+        i=0
+        while [ $i -lt 200 ] && netstat -ltn 2>/dev/null | grep -q ":$NP "; do
+            NP=$((NP + 1)); i=$((i + 1))
+        done
+        echo "$NP" > "$ROOT/www/server/panel/data/port.pl"
+        NEWP=$(in_chroot 'openssl rand -hex 4' 2>/dev/null | tr -d '\r' | tail -1)
+        case "$NEWP" in ''|*[!0-9a-f]*) NEWP=$(printf '%08x' $(( $$ * 7919 )));; esac
+        echo "/$NEWP" > "$ROOT/www/server/panel/data/admin_path.pl"
+        NEWU=$(in_chroot 'openssl rand -hex 4' 2>/dev/null | tr -d '\r' | tail -1)
+        if [ -n "$NEWU" ]; then
+            in_chroot "cd /www/server/panel && ./pyenv/bin/python3 -c \"
+import sqlite3
+c = sqlite3.connect('data/db/panel.db')
+c.execute('update users set username=? where id=1', ('$NEWU',))
+c.commit()\"" || warn "改用户名失败（保持镜像里的），不影响其它"
+        fi
+        in_chroot '/etc/init.d/bt restart' >/dev/null 2>&1 || true
+        log "已重新随机化：端口 $NP，安全入口 /$NEWP，用户名 ${NEWU:-未改}"
+    fi
     U=$(in_chroot 'cd /www/server/panel && ./pyenv/bin/python3 -c "
 import sqlite3
 c=sqlite3.connect(\"data/db/panel.db\")
