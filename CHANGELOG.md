@@ -90,8 +90,10 @@
 * 新增**纯手机终端一行**（不用电脑）：`busybox wget` 从 `codeload.github.com` 拉仓库 tar
   → `busybox tar --strip-components=1` 解开 → 直接跑 `install/deploy.sh`。
   实测：拉到 146,351 字节、解包后 `deploy.sh --check` 全绿。
-* 预制镜像也能让手机自己下：实测 Release 附件（`qyt-image.part-aab` 235,001,052 字节）
-  手机直接下得动，于是「纯手机 + 镜像」这条路也成立。
+* 预制镜像也能让手机自己下，但**这条不稳**：Release 附件走 `objects.githubusercontent.com`，
+  实测同一 URL 有时下得动（482 字节与 235,001,052 字节都成功过），有时连着 5 次
+  `Connection reset by peer`。而仓库 tarball 那条（`codeload.github.com`）复测 3 次全稳。
+  所以「纯手机自举」可靠，「纯手机下镜像」要看运气 —— 文档里就是这么写的。
 
 ### 顺带改掉一处过时口径
 

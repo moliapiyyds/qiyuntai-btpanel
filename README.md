@@ -55,7 +55,9 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 
 ### 最快的一条：预制镜像（约 10 分钟，且不连宝塔服务器）
 
-镜像也能让手机自己下（实测 Release 附件下得动，整卷 235 MB 一秒到手）：
+镜像也能让手机自己下 —— **但这条路不稳，得看运气**：Release 附件走的是
+`objects.githubusercontent.com`，实测同一 URL 有时下得动（482 字节的小校验和、235 MB 的分卷都成功过），
+有时**连着 5 次都是 `Connection reset by peer`**。所以能下就下，下不动就重试，或者干脆从电脑下（见上面 Windows/Linux 那两节）：
 
 ```sh
 su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); D=/data/local/tmp/qyt_image; V=v1.2.6; mkdir -p $D; for p in aaa aab; do $BB wget -O $D/qyt-image.part-$p https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/qyt-image.part-$p; done; $BB wget -O $D/SHA256SUMS.txt https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/SHA256SUMS.txt; sh /data/local/tmp/qyt-repo/install/deploy.sh --from-image $D'
@@ -181,8 +183,15 @@ $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/molia
 > * 2026-09-22 复测（同一条命令、同一台设备、同一个 busybox）：`github.com` / `codeload.github.com`
 >   / `raw.githubusercontent.com` / `api.github.com` **都通了**（分别取到 146351 / 146351 / 24789 /
 >   6344 字节），Release 附件也下得动（整卷 235001052 字节）。
-> * 所以现在的说法是：**两条路都行**。电脑侧更省事（不用在手机上装终端），
->   手机侧自举适合「手边只有手机」的情况。清华镜像（rootfs 的来源）一直都能连。
+> * 所以要分成两件事说（2026-09-22 同一天两边都量了多次）：
+>   * **仓库 tarball（`codeload.github.com`）很稳** —— 连试 3 次全成功（每次 153,364 字节）。
+>     纯手机自举靠的就是它，这条路可靠。
+>   * **Release 附件不稳** —— 走 `objects.githubusercontent.com`，同一 URL 有时成
+>     （482 B 与 235 MB 都下过），有时连续 5 次 `Connection reset by peer`。
+>     手机自己下镜像属于「能下就下，下不动重试或换电脑」。
+> * 所以现在的说法是：**两条路都行**。电脑侧更省事也更稳（不用在手机上装终端、
+>   不用跟 CDN 运气），手机侧自举适合「手边只有手机」的情况。
+> * 清华镜像（rootfs 的来源）一直都能连。
 
 ### 分步部署（想自己控制的用这个）
 

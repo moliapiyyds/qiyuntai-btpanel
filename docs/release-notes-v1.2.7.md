@@ -21,7 +21,8 @@
 su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); T=/data/local/tmp/qyt.tgz; $BB wget -O $T https://codeload.github.com/moliapiyyds/qiyuntai-btpanel/tar.gz/refs/heads/main && mkdir -p /data/local/tmp/qyt-repo && $BB tar -xzf $T -C /data/local/tmp/qyt-repo --strip-components=1 && sh /data/local/tmp/qyt-repo/install/deploy.sh'
 ```
 
-预制镜像也能让手机自己下（实测 Release 附件下得动，整卷 235,001,052 字节）：
+预制镜像也能让手机自己下 —— **但 Release 附件这条路不稳**（实测同一 URL 有时下得动
+482 字节 / 235,001,052 字节都成功过，有时连着 5 次 `Connection reset by peer`）：
 
 ```sh
 su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); D=/data/local/tmp/qyt_image; V=v1.2.6; mkdir -p $D; for p in aaa aab; do $BB wget -O $D/qyt-image.part-$p https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/qyt-image.part-$p; done; $BB wget -O $D/SHA256SUMS.txt https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/SHA256SUMS.txt; sh /data/local/tmp/qyt-repo/install/deploy.sh --from-image $D'
@@ -38,10 +39,15 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 | `codeload.github.com` | **146,351 字节** ✓ |
 | `raw.githubusercontent.com` | **24,789 字节** ✓ |
 | `api.github.com` | **6,344 字节** ✓ |
-| Release 附件（`qyt-image.part-aab`） | **235,001,052 字节** ✓ |
+| Release 附件（`qyt-image.part-aab`） | **235,001,052 字节** ✓（但同一天晚些时候复测，同一 URL 连续 5 次 `Connection reset by peer` —— 这条不稳，见下） |
+| `codeload.github.com` 复测 3 次 | 每次 **153,364 字节** ✓（稳） |
 
-所以「电脑侧准备」现在的定位是**更省事**（不用在手机上装终端、不用解锁屏幕），
-而不是「手机做不到」。README、`deploy.ps1`、`install/deploy.sh` 里的说明都按这个改了，
+所以「电脑侧准备」现在的定位是**更省事也更稳**，而不是「手机做不到」。不过要分成两件事：
+* **仓库 tarball（`codeload.github.com`）稳**：连试 3 次全成功，纯手机自举这条路可靠；
+* **Release 附件（走 `objects.githubusercontent.com`）不稳**：有时成、有时连续被 reset，
+  手机自己下镜像要抱着「可能失败，重试或换电脑」的心态。
+
+README、`deploy.ps1`、`install/deploy.sh` 里的说明都按这个改了，
 并保留了 2026-09-21 那次的原始报错文本作为对照 —— 结论会变，但记录不该抹掉。
 
 ## 附件
