@@ -50,6 +50,25 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 README、`deploy.ps1`、`install/deploy.sh` 里的说明都按这个改了，
 并保留了 2026-09-21 那次的原始报错文本作为对照 —— 结论会变，但记录不该抹掉。
 
+## 还修了一处会让「重跑」白等一小时的问题
+
+`install/qiyuntai-install.sh` 的 `step_components` 原本是四个 `install_soft.sh` 用 `&&`
+**无条件**串起来执行的 —— 也就是说**重跑一次一键命令，OpenResty / MariaDB / PHP 会被重新源码编译**，
+光 MariaDB 就一个多小时。而重跑是很正常的动作（第一次断了、想再确认一遍、手抖多跑一次）。
+
+现在改成逐个组件装、**已经装好的跳过**，判据就用宝塔商店自己那套 `install_checks` 路径
+（跟面板判断「装没装」同一个标准）；真失败会明确报错并提示「修好重跑即可，已装上的不会重复编译」。
+**实测：在装好的环境上重跑 `components` 1 秒结束**（四项全是「已在…跳过编译」），`rootfs` 步骤也会跳过。
+
+## 顺带把文档里的命令都做了一遍语法自检
+
+为了确认「文档里贴的命令复制出来真能跑」，把 7 个 md 里的 **27 个 shell 块**和
+**8 个 PowerShell 块**全抽出来做语法校验：shell 块 `bash -n` **27/27 通过**，
+PowerShell 块用 `Parser::ParseFile` **8/8 通过**；文档里引用的 41 个仓库内路径也逐个查了存在性
+（7 条「不存在」全是误报：说明某文件不存在的句子、chroot 内的路径、另一个仓库的文档、模板占位）。
+顺手把 `docs/handover.md` 发版流程里的 `<新版本>` 占位符改成 `vX.Y.Z` ——
+尖括号会被 `bash -n` 当成重定向。
+
 ## 附件
 
 | 文件 | 大小 | sha256 |
