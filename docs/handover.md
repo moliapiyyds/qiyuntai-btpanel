@@ -188,19 +188,19 @@ bash tools/verify_sync.sh               # 收尾核对
 ```bash
 # 1) 改 module/module.prop 的 version 与 versionCode
 # 2) 同步文档里的版本号：CHANGELOG（把「未发布」改成新版本号）、README 的模块安装示例、
-#    本文件第「一、面板访问」上方的版本行，并新增 docs/release-notes-<新版本>.md
+#    本文件第「一、面板访问」上方的版本行，并新增 docs/release-notes-vX.Y.Z.md
 # 3) 提交推送
-git add -A && git commit -m "切 v<新版本>：..." && git push origin main
+git add -A && git commit -m "切 vX.Y.Z：..." && git push origin main
 
 # 4) 打 zip（版本号从 module.prop 读，脚本会自检 zip 里的 module.prop 对不对）
 bash tools/build_module_zip.sh
 
 # 5) 建 tag + Release + 传附件
-git tag -a v<新版本> -m "栖云台 · 宝塔面板 v<新版本>" && git push origin v<新版本>
-gh release create v<新版本> -R moliapiyyds/qiyuntai-btpanel \
-    --title "栖云台 · 宝塔面板 v<新版本>" \
-    --notes-file "<docs/release-notes-<新版本>.md 的 Windows 路径>" --target main
-gh release upload v<新版本> _dist/qiyuntai_btpanel-v<新版本>.zip -R moliapiyyds/qiyuntai-btpanel --clobber
+git tag -a vX.Y.Z -m "栖云台 · 宝塔面板 vX.Y.Z" && git push origin vX.Y.Z
+gh release create vX.Y.Z -R moliapiyyds/qiyuntai-btpanel \
+    --title "栖云台 · 宝塔面板 vX.Y.Z" \
+    --notes-file "<docs/release-notes-vX.Y.Z.md 的 Windows 路径>" --target main
+gh release upload vX.Y.Z _dist/qiyuntai_btpanel-vX.Y.Z.zip -R moliapiyyds/qiyuntai-btpanel --clobber
 
 # 6) 收尾核对（会去查新 Release 的附件）
 bash tools/verify_sync.sh

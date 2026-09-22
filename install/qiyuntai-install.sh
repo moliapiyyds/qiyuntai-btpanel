@@ -309,14 +309,28 @@ step_components() {
         cp -f "$REPO_DIR/install/lib-shim.sh" "$ROOT/www/server/panel/install/lib.sh"
         chmod 755 "$ROOT/www/server/panel/install/lib.sh"
     fi
-    in_chroot 'cd /www/server/panel/install && \
-      bash install_soft.sh 0 install nginx openresty131 && \
-      bash install_soft.sh 0 install mysql mariadb_10.11 && \
-      bash install_soft.sh 0 install php 8.2 && \
-      bash install_soft.sh 0 install phpmyadmin 5.2'
-    log "组件安装命令已执行（结果见各自输出）"
+    # 逐个组件装，**已经装好的跳过**。
+    # 为什么要有这个跳过（2026-09-22 实测发现）：这一段原来是四个 install_soft.sh 用 && 串起来
+    # 无条件执行 —— 于是「一键命令重跑一次」会把 OpenResty / MariaDB / PHP 全部重新源码编译，
+    # 光 MariaDB 就一个多小时。而重跑是很正常的操作（比如第一次中途断了、或者想再确认一遍）。
+    # 判据就用宝塔商店自己那套 install_checks 路径，和面板判断「装没装」是同一个标准。
+    comp_install "nginx"      "openresty131"   "/www/server/nginx/nginx/sbin/nginx"
+    comp_install "mysql"      "mariadb_10.11"  "/www/server/mysql/bin/mariadbd"
+    comp_install "php"        "8.2"            "/www/server/php/82/bin/php"
+    comp_install "phpmyadmin" "5.2"            "/www/server/phpmyadmin/version.pl"
+    log "组件就绪（已装上的都跳过了）"
 }
 
+# $1=组件名 $2=版本参数 $3=判据路径（chroot 内）
+comp_install() {
+    if [ -e "$ROOT$3" ]; then
+        log "  $1 已在（$3），跳过编译"
+        return 0
+    fi
+    log "  $1 不在，开始装（源码编译，慢）…"
+    in_chroot "cd /www/server/panel/install && bash install_soft.sh 0 install $1 $2" \
+        || fail "$1 安装失败（看上面输出；修好后重跑本步骤即可，已装上的不会重复编译）"
+}
 # 宝塔插件清单 —— 必须和 README.md / module/README.md 里承诺的一致。
 #
 # 【踩过的坑，2026-09-21 核对基线时发现】

@@ -95,6 +95,18 @@
   `Connection reset by peer`。而仓库 tarball 那条（`codeload.github.com`）复测 3 次全稳。
   所以「纯手机自举」可靠，「纯手机下镜像」要看运气 —— 文档里就是这么写的。
 
+### 重跑一键命令不会再重编一小时（`step_components` 原本不幂等）
+
+* 原来 `step_components` 是四个 `install_soft.sh` 用 `&&` **无条件**串起来执行 ——
+  也就是说**重跑一次一键命令，OpenResty / MariaDB / PHP 会被重新源码编译**，
+  光 MariaDB 就一个多小时。而重跑是很正常的动作（第一次断了、想再确认一遍、手抖多跑一次）。
+* 改成逐个组件装、**已经装好的跳过**，判据就用宝塔商店自己那套 `install_checks` 路径
+  （`/www/server/nginx/nginx/sbin/nginx`、`/www/server/mysql/bin/mariadbd`、
+  `/www/server/php/82/bin/php`、`/www/server/phpmyadmin/version.pl`），
+  跟面板判断「装没装」是同一个标准；真失败会 `fail` 并提示「修好重跑即可，已装上的不会重复编译」。
+* 实测：在装好的环境上重跑 `components` **1 秒**结束（四项全是「已在…跳过编译」）；
+  `rootfs` 步骤也会跳过（面板在就直接返回）。
+
 ### 顺带改掉一处过时口径
 
 文档里写了两天的「手机上的 `busybox wget` 连 `github.com` 会被重置，所以只能电脑侧准备」，

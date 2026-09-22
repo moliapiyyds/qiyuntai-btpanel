@@ -73,6 +73,9 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 
 > 从零装耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）；
 > 用预制镜像约 **10 分钟**。
+> **重跑是安全的**：面板 / 组件 / 插件 / 模块 / init 脚本都已经装好的会自动跳过
+> （实测 `components` 步骤重跑 **1 秒**跑完，不会重新编译；rootfs 也跳过）。
+> 这条是 2026-09-22 修的 —— 以前 `step_components` 是无条件执行，重跑一次要再等一个多小时。
 > 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb` / `-Dest`）、分步部署 → 见「三、部署」。
 
 ---
