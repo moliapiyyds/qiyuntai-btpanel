@@ -306,9 +306,16 @@ if [ "$DO_FROM_SOURCE" = "0" ]; then
     # 目标必须干净：带着挂载 rm -rf 会把宿主真实 /dev 删掉（黑屏，实测踩过两次）
     if [ -d "$ROOT" ] && [ -n "$(ls -A "$ROOT" 2>/dev/null)" ]; then
         echo "  $ROOT 非空，说明这台设备已经有环境了。"
-        echo "  镜像路线要先清干净（清之前自己确认数据都备份过了）："
+        echo "  镜像路线要先清干净（清之前自己确认数据都备份过了；这一步会删 $ROOT）："
+        echo
+        echo "      su -c 'sh $REPO/install/prepare-rootfs.sh --clean && sh $0 --from-image $IMAGE_SRC'"
+        echo
+        echo "  想分两步跑也行："
         echo "      su -c 'sh $REPO/install/prepare-rootfs.sh --clean'"
         echo "      su -c 'sh $0 --from-image $IMAGE_SRC'"
+        echo
+        echo "  全新设备（从没装过）不会有这个提示 —— 那种情况直接跑一键命令就行。"
+        echo "  为什么要清：带着挂载 rm -rf 会把宿主真实的 /dev 一起删掉（黑屏，见 docs/pitfalls.md §六）。"
         die "拒绝在非空目录上解包镜像"
     fi
 

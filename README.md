@@ -70,6 +70,30 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 > 实测有时 5 次都 `Connection reset by peer`）。`fetch-image.sh` 会**断点续传 + 重试 5 次**，
 > 实在下不动就换电脑侧那条路，或者手动把分卷推进 `/data/local/tmp/qyt-image` 再跑 `--check` 验一下。
 
+### ⚠️ 手机里已经装过 / 想重装？先清一条命令
+
+`deploy.sh` **会拒绝在非空目录上解包**（`/data/openeuler` 里有东西就不铺）—— 这是故意的：
+带着挂载 `rm -rf` 会把宿主真实的 `/dev` 一起删掉（实测黑屏过三次，见 `docs/pitfalls.md` §六）。
+
+所以重装是**两步**（第一步先确认数据都备份过了，它会删 `/data/openeuler`）：
+
+```sh
+su -c 'sh /data/local/tmp/qyt-repo/install/prepare-rootfs.sh --clean'   # 解挂载 → 断言挂载为 0 → 再删
+su -c 'sh /data/local/tmp/qyt-repo/install/deploy.sh'                   # 然后正常一键（会自动用预制镜像）
+```
+
+或者合成一条（`&&` 前后都跑完才算成功）：
+
+```sh
+su -c 'sh /data/local/tmp/qyt-repo/install/prepare-rootfs.sh --clean && sh /data/local/tmp/qyt-repo/install/deploy.sh'
+```
+
+> **全新设备（从来没装过）不需要这一步** —— 直接跑上面任意一条一键命令即可。
+> `deploy.sh` 遇到非空目录时也会把上面这两条命令**原样打印出来**，照着抄就行。
+>
+> 清环境时会连带那台设备上**还活着的服务**一起变成孤儿进程（它们的二进制被删了但还在跑），
+> 清完重启一次手机最干净；`deploy.sh` 最后本来就会自动重启。
+
 ### 为什么不走宝塔官方源
 
 2026-09-22 定：**一键部署只走预制镜像**。原因是官方安装器那条路「面板版本不在我们手里」：
