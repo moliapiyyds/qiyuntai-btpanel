@@ -67,7 +67,7 @@
 ```
 id            qiyuntai_btpanel
 name          栖云台·宝塔面板
-版本          v1.2.6   (versionCode 10206)
+版本          v1.2.7   (versionCode 10207)
 作者          茉莉 QQ:1265274322  官方Q群:570387739
 目录          /data/adb/modules/qiyuntai_btpanel/
 日志          /data/adb/modules/qiyuntai_btpanel/boot.log
@@ -286,6 +286,10 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 ---
 
 ## 十、v1.2.6 从零重装复核（2026-09-22）
+
+> 本节记录的是 v1.2.6 那次重装（换成预制镜像那版是 v1.2.6 的镜像）。
+> **v1.2.7 只加了部署入口（`deploy-linux.sh` + 纯手机一行）和文档，环境一个字节没变**，
+> 所以这一节的结论对 v1.2.7 同样成立。
 
 > **目的**：老板要求「删掉我这个设备已经有的环境（先备份在手机的其他位置），重新跑看看
 > 是否可以真的一键部署，部署的和正确的是否真的一样」。所以这一节是**从零重装**的记录，

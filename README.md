@@ -14,7 +14,9 @@
 
 ## 一键部署（复制即用）
 
-**在电脑上执行**（需要 `adb` + 能连 GitHub；手机 arm64、已 root、`/data` 空闲 **≥ 20 GB**）：
+前置：手机 **arm64**、已 root（KernelSU / KernelSU-Next / Magisk）、`/data` 空闲 **≥ 20 GB**。
+
+### 电脑是 Windows
 
 ```powershell
 git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
@@ -22,19 +24,54 @@ cd qiyuntai-btpanel
 .\deploy.ps1
 ```
 
-不想 clone 的，**一行**（下载 zip → 解包 → 直接跑）：
+不想 clone 的**一行**（下 zip → 解包 → 直接跑）：
 
 ```powershell
 $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
 ```
 
-剩下的全自动：找 adb → 等设备 → 探 root → 推 `install/` + `module/` + `tools/` → 手机上铺 rootfs
-→ 装面板/组件 → 装 9 个面板插件 + memcached → 基线包对齐 → 打补丁 → 装 KernelSU 模块 → **自动重启**。
+### 电脑是 Linux / macOS
+
+```bash
+git clone https://github.com/moliapiyyds/qiyuntai-btpanel.git
+cd qiyuntai-btpanel
+./deploy-linux.sh            # 参数与 deploy.ps1 等价：--check / --push-only / --no-reboot / --adb / --dest
+```
+
+没有 adb 的话：Debian/Ubuntu `sudo apt install android-tools-adb`，macOS `brew install android-platform-tools`。
+（`deploy-linux.sh` 与 `deploy.ps1` 是两个等价入口，做的事完全一样，改一个记得改另一个。）
+
+### 没有电脑：纯手机终端（一行）
+
+在手机上用 root 终端（KernelSU/Magisk 自带的、或者 Termux `su -c`、或者 `adb shell` 都行）：
+
+```sh
+su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); T=/data/local/tmp/qyt.tgz; $BB wget -O $T https://codeload.github.com/moliapiyyds/qiyuntai-btpanel/tar.gz/refs/heads/main && mkdir -p /data/local/tmp/qyt-repo && $BB tar -xzf $T -C /data/local/tmp/qyt-repo --strip-components=1 && sh /data/local/tmp/qyt-repo/install/deploy.sh'
+```
+
+它自己会：拉仓库（`codeload.github.com`，实测通）→ 解到 `/data/local/tmp/qyt-repo` →
+`install/deploy.sh` 接着铺 rootfs（清华镜像）→ 装面板/组件/插件 → 打补丁 → 装模块 → 重启。
+**想在手机上跑之前先只体检**：把最后那句换成 `sh /data/local/tmp/qyt-repo/install/deploy.sh --check`。
+
+### 最快的一条：预制镜像（约 10 分钟，且不连宝塔服务器）
+
+镜像也能让手机自己下（实测 Release 附件下得动，整卷 235 MB 一秒到手）：
+
+```sh
+su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); D=/data/local/tmp/qyt_image; V=v1.2.6; mkdir -p $D; for p in aaa aab; do $BB wget -O $D/qyt-image.part-$p https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/qyt-image.part-$p; done; $BB wget -O $D/SHA256SUMS.txt https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/SHA256SUMS.txt; sh /data/local/tmp/qyt-repo/install/deploy.sh --from-image $D'
+```
+
+> 前置：上面「纯手机终端」那一步已经跑过（`/data/local/tmp/qyt-repo` 里要有仓库），
+> 或者已经在电脑上 `--push-only` 推过（见「三、部署」）。
+
+三条路剩下的都全自动：找 adb / 等设备 / 探 root → 推 `install/` + `module/` + `tools/` →
+手机上铺 rootfs（或从镜像解包）→ 装面板/组件 → 装 9 个面板插件 + memcached + Tomcat
+→ 基线包对齐 → 打补丁 → 装 KernelSU 模块 → **自动重启**。
 重启后点模块的「执行」按钮，地址和账号密码会直接打印出来。
 
-> 耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）。
-> 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb`）、分步部署、纯手机侧自举 → 见「三、部署」。
-> **装第二台**可以用预制镜像，约 10 分钟且不依赖宝塔服务器 → 见「三、部署 → 预制镜像」。
+> 从零装耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）；
+> 用预制镜像约 **10 分钟**。
+> 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb` / `-Dest`）、分步部署 → 见「三、部署」。
 
 ---
 
@@ -137,10 +174,15 @@ cd qiyuntai-btpanel
 $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
 ```
 
-> **为什么仓库在电脑侧准备，而不是让手机自己下？**
-> 实测手机上的 `busybox wget` 连 `github.com` 会被重置
-> （`wget: got bad TLS record (len:0) ... Connection reset by peer`），
-> 而清华镜像能连上（rootfs 就是从那儿下的）。所以电脑拉好再推过去最稳。
+> **为什么还推荐在电脑侧准备？**
+> 手机侧自举现在也能用（见首页「纯手机终端」那节），但**这个结论变过一次，值得记下来**：
+> * 2026-09-21 实测：手机上的 `busybox wget` 连 `github.com` 会被重置
+>   （`wget: got bad TLS record (len:0) ... Connection reset by peer`），当时只能电脑侧拉好再推。
+> * 2026-09-22 复测（同一条命令、同一台设备、同一个 busybox）：`github.com` / `codeload.github.com`
+>   / `raw.githubusercontent.com` / `api.github.com` **都通了**（分别取到 146351 / 146351 / 24789 /
+>   6344 字节），Release 附件也下得动（整卷 235001052 字节）。
+> * 所以现在的说法是：**两条路都行**。电脑侧更省事（不用在手机上装终端），
+>   手机侧自举适合「手边只有手机」的情况。清华镜像（rootfs 的来源）一直都能连。
 
 ### 分步部署（想自己控制的用这个）
 
@@ -214,7 +256,11 @@ sh install/deploy.sh --from-image /data/qyt_image
   不重新随机，所有用同一镜像的人就完全一样
 * 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**）
 
-**现成的镜像在哪**：Release（当前 `v1.2.6`）的附件里就有 `qyt-image.part-*` 分卷和
+**现成的镜像在哪**：模块 zip 和预制镜像分开发 —— 模块 zip 在最新 Release（**v1.2.7**），
+**预制镜像在 v1.2.6 的 Release** 里（v1.2.7 只改了部署脚本与文档，环境一个字节没变，
+所以没重发那 2.2 GB）。下面命令里的 `V=v1.2.6` 就是「镜像所在的 Release」：
+
+ `qyt-image.part-*` 分卷和
 `SHA256SUMS.txt`（分卷按 1900 MB 切开，GitHub 单附件上限 2 GiB）。
 全部下到**同一个目录**再喂给 `--from-image`（分卷名要按 `part-aaa / -aab / …` 顺序排好，
 `cat qyt-image.part-*` 是按名字拼的）：
@@ -241,8 +287,8 @@ adb shell "su -c 'sh $D/install/deploy.sh --from-image /data/local/tmp/qyt_image
 ### 只想装 / 更新模块（环境已经好了）
 
 ```powershell
-adb push qiyuntai_btpanel-v1.2.6.zip /data/local/tmp/
-adb shell "su -c '/data/adb/ksud module install /data/local/tmp/qiyuntai_btpanel-v1.2.6.zip'"
+adb push qiyuntai_btpanel-v1.2.7.zip /data/local/tmp/
+adb shell "su -c '/data/adb/ksud module install /data/local/tmp/qiyuntai_btpanel-v1.2.7.zip'"
 ```
 
 * `ksud` 的真实路径是 **`/data/adb/ksud`**（不在 `PATH` 里）
@@ -330,8 +376,10 @@ adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh --purge'"
 ## 六、仓库结构
 
 ```
-deploy.ps1               PC 侧一键部署（电脑能连 GitHub，手机只负责装）
+deploy.ps1               Windows 侧一键部署（找 adb → 推 install/module/tools → 手机上装）
+deploy-linux.sh          Linux / macOS 侧一键部署（与 deploy.ps1 等价：--check/--push-only/--no-reboot/--adb/--dest）
 install/deploy.sh        手机侧一键部署（自举：拉仓库 → 铺 rootfs → 装全套 → 重启）
+                         ← 纯手机终端那条路最后就调它（见首页「纯手机终端」）
 
 module/                  KernelSU 模块（刷这个）
   module.prop             模块信息（id / 版本 / 作者）
@@ -371,8 +419,9 @@ tools/                   辅助脚本
 docs/                    说明与记录
   handover.md             交付说明（含版本复核记录）
   pitfalls.md             踩坑记录（全部为实测结论）
-  release-notes-v1.2.6.md 当前版本的 Release 说明
-  release-notes-v1.2.5.md 上一版（历史保留）
+  release-notes-v1.2.7.md 当前版本的 Release 说明
+  release-notes-v1.2.6.md 上一版（历史保留）
+  release-notes-v1.2.5.md 更早的一版（历史保留）
   release-notes-v1.2.4.md 更早的一版（历史保留）
   release-notes-v1.2.3.md 更早的一版（历史保留）
   private-deployment.md   本机真实地址与口令（已 gitignore，不进仓库）

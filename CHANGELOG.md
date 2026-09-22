@@ -72,6 +72,37 @@
 
 ---
 
+## v1.2.7 — 2026-09-22
+
+`versionCode = 10207`
+
+**只加部署入口，没动模块代码**（`module/` 里只有 `module.prop` 的版本号变了）——
+装了 v1.2.6 的人不必为此更新模块。Release 说明见 `docs/release-notes-v1.2.7.md`。
+
+### 三个平台都有一条命令
+
+* 新增 **`deploy-linux.sh`**：Linux / macOS 侧的 `deploy.ps1` 等价入口，做的事完全一样
+  （找 adb → 等设备 → 探 root → 推 `install/module/tools` 到 `/data/local/tmp/qyt-repo`
+  → 手机上跑 `install/deploy.sh`）。参数 `--check` / `--push-only` / `--no-reboot` /
+  `--adb` / `--dest` / `--serial`，`-h` 看帮助。用 bash 写但避开了 bash 4 特性（macOS 自带 3.2 能跑）。
+  实测：`--check` 认设备与 root 正常、`--push-only` 推出 13+6+8 个文件、
+  设备上那份 `module.prop` 是当前版本。
+* 新增**纯手机终端一行**（不用电脑）：`busybox wget` 从 `codeload.github.com` 拉仓库 tar
+  → `busybox tar --strip-components=1` 解开 → 直接跑 `install/deploy.sh`。
+  实测：拉到 146,351 字节、解包后 `deploy.sh --check` 全绿。
+* 预制镜像也能让手机自己下：实测 Release 附件（`qyt-image.part-aab` 235,001,052 字节）
+  手机直接下得动，于是「纯手机 + 镜像」这条路也成立。
+
+### 顺带改掉一处过时口径
+
+文档里写了两天的「手机上的 `busybox wget` 连 `github.com` 会被重置，所以只能电脑侧准备」，
+**2026-09-22 复测已经不成立**：`github.com` / `codeload.github.com` /
+`raw.githubusercontent.com` / `api.github.com` 四个端点都能下（分别 146351 / 146351 /
+24789 / 6344 字节）。README、`deploy.ps1`、`install/deploy.sh` 里的说法都改了，
+并把 2026-09-21 那次的原始报错文本留着做对照 —— 结论会变，记录不该抹掉。
+
+---
+
 ## v1.2.6 — 2026-09-22
 
 `versionCode = 10206`

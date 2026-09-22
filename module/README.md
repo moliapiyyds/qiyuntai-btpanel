@@ -226,6 +226,23 @@ ps -ef | grep -E "BT-Panel|BT-Task|nginx|mariadbd|php-fpm|fail2ban|redis|memcach
 
 ---
 
+### 没装环境？纯手机一行搞定
+
+模块只负责**开机把环境拉起来**；环境本身（openEuler chroot + 面板 + 组件）要装一次。
+手边没有电脑时，在手机上用 root 终端跑这一段就行（KernelSU/Magisk 终端、Termux、`adb shell` 都可以）：
+
+```sh
+su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); T=/data/local/tmp/qyt.tgz; $BB wget -O $T https://codeload.github.com/moliapiyyds/qiyuntai-btpanel/tar.gz/refs/heads/main && mkdir -p /data/local/tmp/qyt-repo && $BB tar -xzf $T -C /data/local/tmp/qyt-repo --strip-components=1 && sh /data/local/tmp/qyt-repo/install/deploy.sh'
+```
+
+* 从零装约 2 小时（源码编译），**装第二台用预制镜像约 10 分钟**，见仓库 README。
+* 只想先体检不装东西：把最后那句换成
+  `sh /data/local/tmp/qyt-repo/install/deploy.sh --check`。
+* 有电脑的话更省事：Windows 跑 `deploy.ps1`，Linux/macOS 跑 `deploy-linux.sh` —— 它们会自己推文件、
+  自己调上面这条 `install/deploy.sh`。
+
+---
+
 ## 六、卸载
 
 在 KernelSU 管理器里卸载本模块，或者手动：

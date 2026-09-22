@@ -11,8 +11,13 @@
 # 它会：
 #   1) 前置检查（root / aarch64 / 磁盘空间 / 工具 / SELinux）
 #   2) 仓库：优先用本地已有的（$REPO 就是本文件所在目录的上一级），
-#      本地没有才尝试从 GitHub 拉 —— **实测手机上连不通 github.com**
-#      （busybox wget 报 TLS record / Connection reset），拉不动时会提示
+#      本地没有才尝试从 GitHub 拉。**这条要注意口径会变**：
+#        2026-09-21 实测手机上的 busybox wget 连 github.com 会被重置
+#          （wget: got bad TLS record (len:0) ... Connection reset by peer），拉不动；
+#        2026-09-22 复测同一台设备同一个 busybox：github.com / codeload /
+#          raw.githubusercontent / api 都通了，Release 附件也下得动。
+#      所以下面这段「自己拉仓库」现在是有用的（以前只是兜底），
+#      拉不动时会打印实测过的排错提示（见 fetch 失败那个分支）。
 #      改用电脑侧推送 + --repo-tar。所以正常路径是 deploy.ps1 先把仓库推上来。
 #   3) 铺 openEuler rootfs（已有面板环境会跳过）
 #   4) 装面板 + 组件 + 插件 + 打补丁 + 装 KernelSU 模块
@@ -184,13 +189,20 @@ else
         say "下载 $TARBALL"
         if ! fetch "$TARBALL" "$WORK/repo.tar.gz"; then
             echo
-            warn "从 GitHub 下载失败。实测手机上的 busybox wget 连 github.com 会被重置："
+            warn "从 GitHub 下载失败。2026-09-21 实测过这个失败长什么样（当时手机上连 github.com 被重置）："
             warn "  wget: got bad TLS record (len:0) while expecting switch to encrypted traffic"
             warn "  wget: error getting response: Connection reset by peer"
+            warn "但 2026-09-22 复测同一台设备是通的（github.com / codeload / api 都能下），"
+            warn "所以现在失败更可能是：手机没网 / DNS 问题（看 /etc/resolv.conf）/ 走了代理。"
             echo
-            echo "  改用电脑侧一条命令（电脑能连 GitHub，手机只负责装）："
+            echo "  也可以换成 codeload 直链（少一次跳转）："
+            echo "      $BB wget -O /data/local/tmp/q.repo.tgz https://codeload.github.com/$REPO_SLUG/tar.gz/refs/heads/main"
+            echo "      sh $0 --repo-tar /data/local/tmp/q.repo.tgz"
             echo
-            echo "      .\\deploy.ps1"
+            echo "  或者在电脑侧一条命令（电脑拉好再推，最省事）："
+            echo
+            echo "      .\\deploy.ps1        （Windows）"
+            echo "      ./deploy-linux.sh    （Linux / macOS）"
             echo
             echo "  或者手动推过来（推 /data/local/tmp —— /sdcard 是 CE 存储，"
             echo "  手机重启后没解锁一次就不可用）："

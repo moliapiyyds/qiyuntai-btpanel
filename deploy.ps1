@@ -33,9 +33,12 @@
 # （实测 KernelSU-Next 的 adbd 常常本身就是 root，这时设备上根本没有 su 命令。）
 #
 # 为什么仓库在电脑侧准备而不是手机上拉：
-#   实测手机上的 busybox wget 连 github.com 会被重置
-#   （wget: got bad TLS record ... Connection reset by peer），
-#   电脑有 git/curl 正常访问。所以电脑拉好再推过去。
+#   2026-09-21 实测手机上的 busybox wget 连 github.com 会被重置
+#   （wget: got bad TLS record ... Connection reset by peer），所以做成了「电脑拉好再推」。
+#   2026-09-22 复测同一台设备：github.com / codeload / raw / api 都通了，
+#   手机上自己拉也行（README 首页「纯手机终端」那节就是那条路）。
+#   电脑侧仍然更省事：不用在手机上装终端，不用解锁屏幕，推完直接跑。
+#   另外 Linux / macOS 侧等价入口是 deploy-linux.sh（改一个记得改另一个）。
 #
 # 注意：本文件必须保存为「UTF-8 带 BOM」，否则 PowerShell 5.1 按 GBK 解析会语法报错。
 # ============================================================
