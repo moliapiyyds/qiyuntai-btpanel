@@ -587,3 +587,57 @@ ls /data/media/0 | head    # 22 字符乱码名 = fscrypt 加密名，不是损�
 getprop ro.crypto.state    # encrypted
 ```
 
+### 7. `/dev` 第三次被毁 —— 这次把机制彻底钉死了（2026-09-22）
+
+前两次（§六.2、§六.4）都只知道「带着 bind 挂载 rm -rf 会毁 /dev」，这次把**每一步**都留下了证据。
+
+**事情经过**：我在真机上验证 `prepare-rootfs.sh` 新加的「跳过解包」逻辑时，拿一个**临时根**
+`/data/oe_test` 当目标跑它 —— 而 `prepare-rootfs.sh` 的「验证 chroot」一步会把
+**宿主的 `/dev` bind 挂到 `$ROOT/dev`**（这是它故意的：后面安装脚本要 chroot 进去用）。
+脚本跑完，我执行了 `rm -rf /data/oe_test`：
+
+```
+rm 顺着 /data/oe_test/dev → 走进真 /dev → 把里面的设备节点全删了
+```
+
+**证据链（都是现场读到的，不是推测）**：
+
+| 现象 | 读数 | 说明 |
+|---|---|---|
+| `/dev` 条目数 | **12**（正常 256） | 设备节点被删 |
+| `/dev/null` | `-rw-rw-rw- 1 root root 54`（**普通文件**，54 字节） | 有命令往「已经不存在」的 /dev/null 重定向时，shell 会**现建一个普通文件**，把那行错误写进去 |
+| `/dev/null` 的内容 | `ls: /data/media/0/*/*/fuck: No such file or directory` | 那 54 字节就是被写进去的错误信息 |
+| 活下来的条目 | `blkio` `cg2_bpf` `cpuctl` `cpuset` `frz` `iolimit` `pts` `shm` `stune` `usb-ffs` | **它们本身是挂载点**，`rm` 进不去挂载点，所以活下来了 —— 这条反过来印证了「是 rm 顺着挂载删的」 |
+| `/dev` 上的两层文件系统 | `devtmpfs on /dev` + `tmpfs on /dev` | **这是正常的**（Android 就是这么叠的），一开始我把它当成异常，查了 `/proc/1/mountinfo` 与 `/proc/self/mountinfo` 完全一致才排除 |
+| 症状 | `getprop` 全空、`dumpsys` 报 Aborted、`zygote`/`system_server` 消失、黑屏 | `/dev/socket` 没了 → property service / binder 全崩 |
+
+**复位手法**（这次走的还是 §六.2 那套，实测有效、约 2 分钟恢复）：
+
+```sh
+# 1) 先删掉那个假的 /dev/null，补回基础节点
+rm -f /dev/null && mknod /dev/null c 1 3 && chmod 666 /dev/null
+for n in "1 5:zero" "1 8:random" "1 9:urandom" "1 7:full" "5 0:tty" "5 1:console" "5 2:ptmx"; do
+    m=${n%%:*}; d=${n##*:}
+    # shellcheck disable=SC2086
+    [ -e /dev/$d ] || mknod /dev/$d c $m
+done
+# 2) 重启（只有 init/ueventd 能把 /dev/socket、binder、ashmem 这些重建出来）
+echo b > /proc/sysrq-trigger
+# 3) 回来后自检：/dev 应回到 256 项、/dev/socket 有 ~29 项、
+#    init.svc.zygote=running、sys.boot_completed=1、binder/ashmem 都在
+```
+
+> `adb reboot` 与 `setprop sys.powerctl reboot` 在 `/dev` 坏掉时都**不可用**，
+> 只有 `echo b > /proc/sysrq-trigger` 有效（三次都是）。
+
+**代价与结论**：这次**没有丢任何东西** —— `/data/openeuler`（chroot 环境）、
+`/data/qyt_backup_20260921`（5.98 GB 备份）、`/data/qyt_image`（镜像）全都在，
+重启后 8 个端口照旧自己起来了（服务不依赖宿主 `/dev`，它们 chroot 里另有一份）。
+**但这条纪律必须写死**：
+
+> **任何 `rm -rf <目录>` 之前，先 `mount | grep -c "<目录>"`。**
+> 仓库里 `make_image.sh`、`uninstall.sh --purge`、`prepare-rootfs.sh --clean` 都有这个断言，
+> **我自己的临时测试脚本没有** —— 三次事故全部发生在「仓库脚本之外的临时操作」里。
+> 临时脚本要么走 `--unmount` 再删，要么干脆别删（重启后挂载自然消失）。
+
+

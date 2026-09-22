@@ -37,8 +37,26 @@ TMP=/data/local/tmp/qiyuntai
 MIRROR=https://mirrors.tuna.tsinghua.edu.cn/openeuler/openEuler-24.03-LTS-SP3/docker_img/aarch64
 # 官方安装器：先落盘再校验，不 curl | bash（原因见 step_panel 注释）
 INSTALLER_URL=https://download.bt.cn/install/install_panel.sh
+# 备用①：同一个域名的**明文 HTTP**。有些网络里 443 被拦/被代理弄坏，80 反而通。
+# 备用②（最可靠）：你自己已经下好一份放在手机上 —— 下面这个路径，或者用 --installer <文件> 指定。
+#   实测踩过（2026-09-22，别人装的时候）：这一步报
+#     curl: (6) Could not resolve host: download.bt.cn
+#   而**同一份日志里 dnf 刚用同一个 /etc/resolv.conf 从 openEuler 镜像装完 292 个包** ——
+#   所以那不是「整台机器 DNS 坏了」，是 download.bt.cn 这个**单个域名**解析不到
+#   （DNS 污染 / 运营商拦截 / 梯子的 split-DNS 都可能）。以前这里只有一个源、失败就 exit，
+#   用户看到的就是一句「下载失败」，既不知道是哪种、也不知道下一步该干嘛。
+INSTALLER_URL_HTTP=http://download.bt.cn/install/install_panel.sh
+INSTALLER_HOST=download.bt.cn
+INSTALLER_LOCAL=/data/local/tmp/install_panel.sh
+INSTALLER_FILE=""        # --installer <文件> 指定
 CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
 STEP="${1:-all}"
+# 允许 `sh qiyuntai-install.sh panel --installer /path/install_panel.sh`
+case "${2:-}" in
+    --installer) INSTALLER_FILE="${3:-}" ;;
+    '')          ;;
+    *)           echo "[栖云台][注意] 不认识的参数：$2" >&2 ;;
+esac
 
 log()  { echo "[栖云台] $*"; }
 # warn 是后来加警告时才开始用的，但一开始忘了定义 —— 结果是 18 处警告全都变成
@@ -51,6 +69,42 @@ in_chroot() { chroot "$ROOT" /usr/bin/env -i $CHENV /bin/bash -c "$1"; }
 
 need_root() {
     [ "$(id -u)" = "0" ] || fail "请用 root 执行（su -c 'sh $0'）"
+}
+
+# 拿不到宝塔安装器时的诊断 —— 这一步失败**不代表你整台机器有问题**，
+# 也不代表前面的步骤白跑了（rootfs 与 dnf 跟 download.bt.cn 无关，装过的东西都会留着）。
+panel_dl_diagnose() {
+    echo ""
+    warn "拿不到宝塔安装器。先把话说清楚，免得往错的方向查："
+    warn "  * 这**不代表**你整台手机的 DNS 坏了 —— 实测那份日志里，dnf 刚用同一个"
+    warn "    /etc/resolv.conf 从 openEuler 镜像装完 292 个包；"
+    warn "  * 也不代表 GitHub 或梯子的锅（仓库包、rootfs 在前面都下成功了）；"
+    warn "  * 最像的是**单个域名解析不到**（DNS 污染 / 运营商拦截 / 梯子的 split-DNS）。"
+    echo ""
+    echo "  ---- 在 chroot 里现场诊断 ----"
+    in_chroot 'echo "  /etc/resolv.conf:"; sed "s/^/    /" /etc/resolv.conf' 2>/dev/null || true
+    local h
+    for h in "$INSTALLER_HOST" www.bt.cn repo.openeuler.org; do
+        if in_chroot "getent hosts $h >/dev/null 2>&1"; then
+            echo "    解析 OK   $h    → $(in_chroot "getent hosts $h" | head -1 | awk '{print $1}')"
+        else
+            echo "    解析失败  $h"
+        fi
+    done
+    echo "    （repo.openeuler.org 也不通 = 整机 DNS/网络问题；只有 bt 不通 = 单域名问题）"
+    echo ""
+    echo "  ---- 出路（任选一条，装过的东西不会重来）----"
+    echo "   1) 在电脑或手机浏览器上把安装器下好，推过来再重跑本步骤："
+    echo "        curl -fsSL -o install_panel.sh https://download.bt.cn/install/install_panel.sh"
+    echo "        adb push install_panel.sh /data/local/tmp/"
+    echo "        sh $0 panel          # 会直接用 /data/local/tmp/install_panel.sh，不再联网下"
+    echo "      （也可以： sh $0 panel --installer /别的路径/install_panel.sh ）"
+    echo "   2) 换网络（Wi-Fi ↔ 流量）再试；挂了梯子/VPN 的话关掉再试一次"
+    echo "      —— 有些梯子只对国外域名友好，国内域名反而解析不了。"
+    echo "   3) 绕开宝塔服务器：用预制镜像装（完全不碰 download.bt.cn）"
+    echo "        sh $0 --help 不适用；见 README「预制镜像」："
+    echo "        sh install/prepare-rootfs.sh --clean && sh install/deploy.sh --from-image <镜像目录>"
+    echo ""
 }
 
 # ---------------- 1) rootfs ----------------
@@ -118,6 +172,27 @@ step_mount() {
     # 宝塔需要的两个前置文件
     [ -f "$ROOT/var/bt_setupPath.conf" ] || echo "/www" > "$ROOT/var/bt_setupPath.conf"
     [ -f "$ROOT/etc/redhat-release" ]    || echo "openEuler release 24.03 (LTS-SP3)" > "$ROOT/etc/redhat-release"
+    # docker 基础镜像里没有 /etc/hostname，宝塔安装器一上来就
+    #   cat: /etc/hostname: No such file or directory
+    # （无害，但会让日志第一行是红字；从预制镜像装的时候也要补，所以放在这里）
+    [ -s "$ROOT/etc/hostname" ]          || echo "openeuler" > "$ROOT/etc/hostname"
+
+    # ---- DNS 体检 ----
+    # 为什么要在这儿做（实测，2026-09-22 别人装的时候踩到）：他跑完整套 dnf（292 个包，
+    # 20 分钟）之后，倒在「下载宝塔安装器」那步：
+    #     curl: (6) Could not resolve host: download.bt.cn
+    # 而同一份日志里 dnf 用的就是同一个 /etc/resolv.conf —— 也就是说不是整台机器 DNS 坏了，
+    # 是那**一个**域名解析不到。这种「单域名解析失败」如果在开头就报出来，
+    # 用户就不会白等 20 分钟，也不会误以为是 GitHub/梯子的问题。
+    local h
+    for h in repo.openeuler.org download.bt.cn; do
+        if in_chroot "getent hosts $h >/dev/null 2>&1"; then
+            log "  DNS 解析 OK：$h"
+        else
+            warn "  DNS 解析不了：$h"
+            [ "$h" = "download.bt.cn" ] && warn "  （宝塔安装器与面板包都从这里下；这条不通的话，从零装会在最后一步断掉，见 step_panel 的提示）"
+        fi
+    done
     log "挂载完成"
 }
 
@@ -169,9 +244,33 @@ step_deps() {
 step_panel() {
     [ -x "$ROOT/www/server/panel/BT-Panel" ] && { log "面板已安装，跳过"; return 0; }
 
-    log "下载宝塔官方安装器（先落盘，不再 curl|bash）"
-    in_chroot "curl -fsSL --max-time 120 -o /root/install_panel.sh $INSTALLER_URL" \
-        || fail "下载 install_panel.sh 失败（$INSTALLER_URL）"
+    log "准备宝塔官方安装器（先落盘，不再 curl|bash）"
+    local got=0
+    # ① 本地已经有（用户自己下好推过来的，或 --installer 指定的）→ 直接用，不联网
+    if [ -n "$INSTALLER_FILE" ]; then
+        [ -f "$INSTALLER_FILE" ] || fail "--installer 指定的文件不存在：$INSTALLER_FILE"
+        cp -f "$INSTALLER_FILE" "$ROOT/root/install_panel.sh" && got=1
+        log "  用指定安装器：$INSTALLER_FILE"
+    elif [ -f "$INSTALLER_LOCAL" ]; then
+        cp -f "$INSTALLER_LOCAL" "$ROOT/root/install_panel.sh" && got=1
+        log "  用手机上已有的安装器：$INSTALLER_LOCAL（跳过下载）"
+    fi
+
+    # ② 下载：https → http 依次试，带重试；连接超时短、总时长放宽（慢网络 120 秒可能不够）
+    if [ "$got" = "0" ]; then
+        for u in "$INSTALLER_URL" "$INSTALLER_URL_HTTP"; do
+            log "  下载：$u"
+            if in_chroot "curl -fsSL --retry 3 --retry-delay 3 --connect-timeout 20 --max-time 300 -o /root/install_panel.sh '$u'"; then
+                got=1
+                break
+            fi
+            warn "  这个源没成，换下一个"
+        done
+    fi
+    if [ "$got" != "1" ] || [ ! -s "$ROOT/root/install_panel.sh" ]; then
+        panel_dl_diagnose
+        fail "拿不到 install_panel.sh（已试：本地 $INSTALLER_LOCAL、$INSTALLER_URL、$INSTALLER_URL_HTTP）"
+    fi
 
     local H
     H=$(in_chroot 'sha256sum /root/install_panel.sh' | cut -d' ' -f1 | tr -d '\r')

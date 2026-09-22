@@ -161,6 +161,17 @@ MariaDB、Redis、PHP、OpenResty、fail2ban、Tomcat 全部可连。
 
 仓库在 GitHub：`https://github.com/moliapiyyds/qiyuntai-btpanel`，本机 `D:\tc\recon\qiyuntai-repo` 是它的工作副本。
 
+### 哪些改动要发版本、哪些不用（2026-09-22 定的规矩）
+
+| 改动 | 要不要升版本 / 发 Release | 用户怎么拿到 |
+|---|---|---|
+| `module/` 里的东西（`service.sh` / `action.sh` / `customize.sh` / `uninstall.sh` / `README.md`） | **要**：改 `module.prop` 的 version/versionCode、重打 zip、发 Release | 刷新的模块 zip |
+| `install/` 部署脚本、`tools/` 工具、文档（README / docs / CHANGELOG） | **不用**：提交推 `main` 就行 | 一键命令拉的就是 `main`（`refs/heads/main`），立刻生效 |
+
+> 所以「`HEAD` 比最新 tag 新几个提交」是**正常的**，不是不一致 —— `tools/verify_sync.sh`
+> 比的也是 `module/` 的内容，它只看模块那一条线。tag 依然是对应那一刻的完整快照，
+> 想钉住某个版本就拉 `refs/tags/vX.Y.Z`（纯手机那条命令把 `main` 换成 tag 路径即可）。
+
 ### 日常改动
 
 ```bash

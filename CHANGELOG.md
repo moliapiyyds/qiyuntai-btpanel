@@ -1,74 +1,63 @@
-## v1.2.5 — 2026-09-22
+## 未发布（相对 v1.2.7）
 
-`versionCode = 10205`
+> **交付规则（说清楚，免得每次都纠结要不要升版本号）**：
+> * `module/` 里的东西（`service.sh` / `action.sh` / `customize.sh` / `uninstall.sh` / `README.md` /
+>   `module.prop`）**跟 tag 与 Release 附件走** —— 改了才升 `module.prop` 的版本号、重打 zip、发 Release；
+> * `install/` 里的部署脚本、`tools/` 里的工具、以及文档，**跟 `main` 走** ——
+>   一键命令拉的就是 `main`（`refs/heads/main`），改完提交推送立刻生效，不必为它们发版本。
+>   tag 仍然是对应那一刻的**完整快照**（想钉版本就拉 `refs/tags/vX.Y.Z`），
+>   所以「HEAD 比最新 tag 新几个提交」是正常的，不是不一致。
+> 这一段就是第二类改动。
 
-这一版改的主体是**部署脚本**（`install/`）：把「文档里承诺了、脚本从没做过」的东西
-一处一处补上。`module/` 的**代码逻辑没改**，只动了 `module.prop` 的版本号 ——
-切版本号是为了让「tag / Release 附件」指向同一个提交。
+### 有人装到「下载宝塔安装器」那步挂了：这里补上韧性、诊断和出路
 
-> 下面这些条目相对 v1.2.4 的增量。Release 说明见 `docs/release-notes-v1.2.5.md`。
+实测日志（别人在 Redmi K70E / Android 16 上跑纯手机那条命令）：
+前面**全过**——仓库包 152k ✓、rootfs 38.8M ✓、`dnf` 292 个包 `Complete!` ✓，
+最后一步倒在 `curl: (6) Could not resolve host: download.bt.cn`。
 
-### `crond` / `tomcat` / `memcached` 的 init 脚本从来没被装进 chroot
+**先纠正一个容易走偏的判断**：这不是「整台手机 DNS 坏了」，
+因为同一份日志里 `dnf` 用的就是**同一个 `/etc/resolv.conf`**，刚把 292 个包从
+openEuler 镜像装完。也不是 GitHub / 梯子的问题（GitHub 那条下成功了）。
+它更像**单个域名解析不到**（DNS 污染 / 运营商拦截 / 梯子的 split-DNS）。
 
-* 实测（`/data/local/tmp/qyt_check_initd2.sh`）chroot 里 `/etc/init.d/` 只有
-  `README`、`bt`、`nginx` 三项。于是逐个服务对账「这个 init 脚本谁给」：
+改了什么：
 
-  | 服务 | init 脚本来源 |
-  |---|---|
-  | `bt` `nginx` `mysqld` `php-fpm-82` | 宝塔安装器 / 组件安装脚本 |
-  | `fail2ban` `redis` | 宝塔对应插件 |
-  | `crond` `tomcat` `memcached` | **没有任何上游来源**，只能仓库自己写 |
+* `step_panel` 从「一次 `curl` 失败就 `exit`」改成三条路依次试：
+  **① 本地已有安装器**（`/data/local/tmp/install_panel.sh`，或 `--installer <文件>`）
+  → **② `https`** → **③ `http`**（有些网络 443 被拦、80 反而通），
+  下载带 `--retry 3 --retry-delay 3`，连接超时 20 秒、总时长从 120 秒放宽到 300 秒
+  （慢网络 120 秒确实不够）。
+* 全失败时调用新的 `panel_dl_diagnose()`：打印 `/etc/resolv.conf`、
+  在 chroot 里现场 `getent hosts` 三个域名（`download.bt.cn` / `www.bt.cn` / `repo.openeuler.org`，
+  最后一个是对照：它也不通才是整机问题）、并给出三条可执行的出路。
+* `step_mount` 新增**开机后的 DNS 体检**：挂完就 `getent` 一遍
+  `repo.openeuler.org` 与 `download.bt.cn`，哪个解析不了当场告警 ——
+  这样就不会「白等 20 分钟装完 292 个包才炸在最后一步」。
+* 新增 `install/qiyuntai-install.sh <步骤> --installer <文件>`。
 
-* 后果不是报错，是**静默跳过**：`module/service.sh` 的 `start_svc` 在
-  `/etc/init.d/<名字>` 不存在时只打印一行「跳过」，然后什么都不发生。
-  `crond` 还有 `/usr/sbin/crond` 兜底，`tomcat` 和 `memcached` **没有兜底** ——
-  也就是 Tomcat、Memcached 永远起不来，而启动日志看着一切正常。
-* `install/crond.initd` 和 `install/tomcat.initd` **早就在仓库里，但没有任何脚本引用它们**，
-  只出现在文档里。现在 `install/qiyuntai-install.sh` 的 `step_patch` 会把它们
-  `cp` 进 `$ROOT/etc/init.d/` 并 `chmod 755`。
-* 同一次对账里发现 `memcached` 连 `.initd` 都没有，补了 `install/memcached.initd`
-  （openEuler 的 memcached 包只带 systemd 单元，chroot 里没有 systemd；宝塔那 9 个插件
-  里也没有 memcached 插件），一并纳入 `step_patch` 的安装清单。
-* 再往下追一层发现**连 memcached 这个二进制都没有来源**：面板 13.0.0 的
-  `install_soft.sh` 里已经搜不到 memcached，openEuler 源里只有 1.6.22，而基线是 **1.6.45**
-  装在 `/usr/local/memcached/bin/memcached`（2019 年那份宝塔 init 脚本写死的路径，
-  也正是 README 里写的「面板商店判断装没装」的路径）。
-  实测宝塔下载站上 **只有** `memcached-1.6.45.tar.gz` 返回 200（1.6.22 / 1.6.38 都是 404），
-  所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
-  （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
-* **memcached 起不来的真因（实测定位）**：它的 init 脚本用 `-u memcached` 起
-  （memcached 拒绝以 root 跑），而它降权时只做 `setgid/setuid`、**不带附加组**
-  （`/proc/<pid>/status` 的 `Groups:` 是空的），于是 Android 的 paranoid-network
-  过不去，bind 127.0.0.1:11211 报 `Permission denied` —— 而 init 脚本把输出吞了，
-  只留一句「memcached 启动失败」。三种写法实测：
-  「主组改 inet + `-u memcached`」成功、「`-u root`」成功、「只加附加组」失败。
-  所以把 `memcached` 的**主组**改成 `inet`（三处：step_memcached / android-network-fix.sh /
-  service.sh 开机兜底）。
+### 顺手修掉三个真 bug
 
+* **`prepare-rootfs.sh` 提示语里的反引号**：`echo "… 直接跑 \`./deploy.ps1\` …"` —— 反引号在双引号里
+  会被 shell 当**命令替换**执行掉，于是日志里出现
+  `prepare-rootfs.sh[413]: ./deploy.ps1: inaccessible or not found`，提示文字还少一块。
+  外部日志里能看到两遍（因为那条路径会被跑两次，见下）。
+* **`/etc/hostname` 那段被嵌错了层**：它原来在 `if ! grep '^inet:x:3003:'` 块**里面**
+  （缩进看不出来），于是「inet 组已存在」的场景（重跑、从镜像装）永远不补 hostname，
+  宝塔安装器就会 `cat: /etc/hostname: No such file or directory`。已独立出来。
+* **rootfs 被铺两遍**：`install/deploy.sh` 先调一次 `prepare-rootfs.sh`，
+  接着 `qiyuntai-install.sh` 的 `step_rootfs` 又调一次（参数一模一样），
+  于是「下载 → 解压 → 解 docker 层 → 叠加」整套跑两遍（别人的日志里能数出两遍）。
+  现在目标里已经有 openEuler 就跳过解包，只做收尾（DNS / hostname / inet）。
+* 顺带把「manifest.json 里没解析出 Layers」那条警告改成人话：
+  那是 openEuler 官方镜像的正常现象（层信息在 OCI 的 index.json 里），退化成按目录名扫描照样铺得成。
 
-### 新增「基线包对齐」步骤（`parity`）
+### 文档
 
-* 手写脚本漏装是常态，读代码查不全，那就对数据：仓库里带一份
-  `install/baseline-packages.txt`（删除前那台的 `rpm -qa` 输出，548 行 / 20899 字节，
-  sha256 `4b3c870a…`，与设备上那份逐字节一致）。
-* `parity` 按**包名**比对（版本会被源往前推：实测 glibc/libxml2/util-linux 等 20 来个
-  名字相同版本不同），缺的先批量装、不行再逐个兜底，最后如实报告源里已经没有的那些名字。
-* 实测这步补齐了 java-*-openjdk / jq / htop / bind-utils / libpcap 等一批基线里有的包。
-
-
-### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
-
-* `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
-  文档也写着它，但**没有任何脚本装 `openssh-server`，也没有任何脚本写这个配置文件**。
-  实测：`step_deps` 的 dnf 清单里根本没有 openssh 相关的包。
-* 基线（删除前那台）确认是活的：`netstat` 有 `0.0.0.0:22  LISTEN  …/sshd_config_mo`，
-  `pkglist_pre.txt` 里有 `openssh-server-9.6p1-21.oe2403sp3`。也就是说它当年是手工装的。
-* 现在：`step_deps` 加 `openssh-server openssh-clients`，`step_patch` 把
-  `install/sshd_config_moli` 装到 `/etc/ssh/`，并在缺主机密钥时跑一次 `ssh-keygen -A`。
-  配置文件内容是从删除前的备份 tarball 里原样取出来的 —— 365 字节，
-  sha256 `951da0fbe8f7e6101582d61fd2778a4094fd4c536e6adf4e81fa992bd2e064d7`，与备份逐字节一致。
-* 顺带：`--from-image` 的时候会**重新生成主机密钥**（`rm -f /etc/ssh/ssh_host_*` + `ssh-keygen -A`），
-  否则同一个镜像刷多台设备会共用同一份主机密钥。
+* README 首页在「一键部署」下面加了一段醒目提示：从零装需要 `download.bt.cn`，
+  失败长什么样、**不是**什么原因、以及三条出路（含 `--installer` 的完整命令）。
+* `docs/pitfalls.md` §六.7 记了第三次 `/dev` 事故的**完整机制**（这次查清了：
+  `prepare-rootfs.sh` 会把宿主 `/dev` bind 到 `$ROOT/dev`，之后 `rm -rf $ROOT` 会顺着挂载
+  删进真 `/dev`），以及复位手法与那条铁律：**`rm -rf` 之前先 `mount | grep -c <目标>`**。
 
 ---
 
@@ -210,6 +199,80 @@ redis 插件、以及一批环境细节），另外修了部署链路自己的 5
 原来清单写在 `$ROOT/IMAGE-MANIFEST.txt`，而 `$ROOT` 就是下一行要 `tar` 的整棵树 ——
 结果清单既被冻进镜像、又不在输出目录里所以上传命令带不上它，
 而 README 与 Release 说明里都是把它当附件列的。
+
+---
+
+## v1.2.5 — 2026-09-22
+
+`versionCode = 10205`
+
+这一版改的主体是**部署脚本**（`install/`）：把「文档里承诺了、脚本从没做过」的东西
+一处一处补上。`module/` 的**代码逻辑没改**，只动了 `module.prop` 的版本号 ——
+切版本号是为了让「tag / Release 附件」指向同一个提交。
+
+> 下面这些条目相对 v1.2.4 的增量。Release 说明见 `docs/release-notes-v1.2.5.md`。
+
+### `crond` / `tomcat` / `memcached` 的 init 脚本从来没被装进 chroot
+
+* 实测（`/data/local/tmp/qyt_check_initd2.sh`）chroot 里 `/etc/init.d/` 只有
+  `README`、`bt`、`nginx` 三项。于是逐个服务对账「这个 init 脚本谁给」：
+
+  | 服务 | init 脚本来源 |
+  |---|---|
+  | `bt` `nginx` `mysqld` `php-fpm-82` | 宝塔安装器 / 组件安装脚本 |
+  | `fail2ban` `redis` | 宝塔对应插件 |
+  | `crond` `tomcat` `memcached` | **没有任何上游来源**，只能仓库自己写 |
+
+* 后果不是报错，是**静默跳过**：`module/service.sh` 的 `start_svc` 在
+  `/etc/init.d/<名字>` 不存在时只打印一行「跳过」，然后什么都不发生。
+  `crond` 还有 `/usr/sbin/crond` 兜底，`tomcat` 和 `memcached` **没有兜底** ——
+  也就是 Tomcat、Memcached 永远起不来，而启动日志看着一切正常。
+* `install/crond.initd` 和 `install/tomcat.initd` **早就在仓库里，但没有任何脚本引用它们**，
+  只出现在文档里。现在 `install/qiyuntai-install.sh` 的 `step_patch` 会把它们
+  `cp` 进 `$ROOT/etc/init.d/` 并 `chmod 755`。
+* 同一次对账里发现 `memcached` 连 `.initd` 都没有，补了 `install/memcached.initd`
+  （openEuler 的 memcached 包只带 systemd 单元，chroot 里没有 systemd；宝塔那 9 个插件
+  里也没有 memcached 插件），一并纳入 `step_patch` 的安装清单。
+* 再往下追一层发现**连 memcached 这个二进制都没有来源**：面板 13.0.0 的
+  `install_soft.sh` 里已经搜不到 memcached，openEuler 源里只有 1.6.22，而基线是 **1.6.45**
+  装在 `/usr/local/memcached/bin/memcached`（2019 年那份宝塔 init 脚本写死的路径，
+  也正是 README 里写的「面板商店判断装没装」的路径）。
+  实测宝塔下载站上 **只有** `memcached-1.6.45.tar.gz` 返回 200（1.6.22 / 1.6.38 都是 404），
+  所以基线那份就是从它编出来的。新增 `step_memcached`：照这个路径编 1.6.45
+  （sha256 pin `d362c64e…`），编不出来才退回 dnf 的 1.6.22 并在日志里说明版本不同。
+* **memcached 起不来的真因（实测定位）**：它的 init 脚本用 `-u memcached` 起
+  （memcached 拒绝以 root 跑），而它降权时只做 `setgid/setuid`、**不带附加组**
+  （`/proc/<pid>/status` 的 `Groups:` 是空的），于是 Android 的 paranoid-network
+  过不去，bind 127.0.0.1:11211 报 `Permission denied` —— 而 init 脚本把输出吞了，
+  只留一句「memcached 启动失败」。三种写法实测：
+  「主组改 inet + `-u memcached`」成功、「`-u root`」成功、「只加附加组」失败。
+  所以把 `memcached` 的**主组**改成 `inet`（三处：step_memcached / android-network-fix.sh /
+  service.sh 开机兜底）。
+
+
+### 新增「基线包对齐」步骤（`parity`）
+
+* 手写脚本漏装是常态，读代码查不全，那就对数据：仓库里带一份
+  `install/baseline-packages.txt`（删除前那台的 `rpm -qa` 输出，548 行 / 20899 字节，
+  sha256 `4b3c870a…`，与设备上那份逐字节一致）。
+* `parity` 按**包名**比对（版本会被源往前推：实测 glibc/libxml2/util-linux 等 20 来个
+  名字相同版本不同），缺的先批量装、不行再逐个兜底，最后如实报告源里已经没有的那些名字。
+* 实测这步补齐了 java-*-openjdk / jq / htop / bind-utils / libpcap 等一批基线里有的包。
+
+
+### sshd 兜底通道（`:22`）同样是「文档里有、脚本里没有」
+
+* `module/service.sh` 第 4.7 段会拿 `/etc/ssh/sshd_config_moli` 拉起 `/usr/sbin/sshd`，
+  文档也写着它，但**没有任何脚本装 `openssh-server`，也没有任何脚本写这个配置文件**。
+  实测：`step_deps` 的 dnf 清单里根本没有 openssh 相关的包。
+* 基线（删除前那台）确认是活的：`netstat` 有 `0.0.0.0:22  LISTEN  …/sshd_config_mo`，
+  `pkglist_pre.txt` 里有 `openssh-server-9.6p1-21.oe2403sp3`。也就是说它当年是手工装的。
+* 现在：`step_deps` 加 `openssh-server openssh-clients`，`step_patch` 把
+  `install/sshd_config_moli` 装到 `/etc/ssh/`，并在缺主机密钥时跑一次 `ssh-keygen -A`。
+  配置文件内容是从删除前的备份 tarball 里原样取出来的 —— 365 字节，
+  sha256 `951da0fbe8f7e6101582d61fd2778a4094fd4c536e6adf4e81fa992bd2e064d7`，与备份逐字节一致。
+* 顺带：`--from-image` 的时候会**重新生成主机密钥**（`rm -f /etc/ssh/ssh_host_*` + `ssh-keygen -A`），
+  否则同一个镜像刷多台设备会共用同一份主机密钥。
 
 ---
 

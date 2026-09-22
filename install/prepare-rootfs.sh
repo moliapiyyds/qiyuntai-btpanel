@@ -313,9 +313,19 @@ if [ "$AVAIL_KB" -lt "$NEED_KB" ]; then
 fi
 say "空间够用"
 
-# ---------- 解开 docker 层 ----------
+# ---------------- 解开 docker 层 ----------------
 echo ""
 echo "---- 解开 docker 层 ----"
+# 已经解过一次就别再解一遍：install/deploy.sh 会先调一次本脚本，接着
+# install/qiyuntai-install.sh 的 step_rootfs 又调一次（一模一样的参数），
+# 于是「下完 → 解压 → 解 docker 层 → 叠加」整套跑了两次（实测日志里能数出来两遍）。
+# 判据用「目标里已经有 openEuler 的基础文件」——收尾动作（DNS/hostname/inet）照旧会执行。
+if [ -f "$ROOT/etc/os-release" ] && [ -x "$ROOT/usr/bin/rpm" ]; then
+    say "目标 $ROOT 里已经有 openEuler（$(sed -n 's/^PRETTY_NAME=//p' "$ROOT/etc/os-release" 2>/dev/null | head -1)），跳过解包"
+    SKIP_EXTRACT=1
+fi
+
+if [ "${SKIP_EXTRACT:-0}" != "1" ]; then
 rm -rf "$LAYER_DIR"; mkdir -p "$LAYER_DIR" || die "建不了 $LAYER_DIR"
 $TAR -xf "$SRC_TAR" -C "$LAYER_DIR" || die "解 docker tar 失败"
 say "已解开到 $LAYER_DIR"
@@ -332,7 +342,10 @@ fi
 FLAT=$(tr -d '\n\r ' < "$LAYER_DIR/manifest.json")
 LAYERS=$(echo "$FLAT" | sed 's/.*"Layers":\[//; s/\].*//' | tr ',' '\n' | tr -d '"' | grep 'layer\.tar$')
 if [ -z "$LAYERS" ]; then
-    echo "！manifest.json 里没解析出 Layers，退化为按目录名扫描（顺序不保证）"
+    # 这条不是错误 —— openEuler 官方 docker 镜像就是这个样子（实测）：
+    # 它用 OCI 布局，层信息在 index.json/blobs 那边，manifest.json 里没有 "Layers"。
+    # 退化成按目录名扫描照样能铺好（本机两次实测都成功）。
+    say "manifest.json 里没有 Layers 字段（openEuler 官方镜像的正常现象），改用按目录名扫描"
     LAYERS=$(cd "$LAYER_DIR" && ls -d */layer.tar 2>/dev/null | sort)
 fi
 [ -n "$LAYERS" ] || die "没找到 layer.tar"
@@ -352,6 +365,7 @@ while read -r L; do
     $TAR -xf "$LAYER_DIR/$L" -C "$ROOT" || die "叠加层失败：$L"
 done < "$LAYER_LIST"
 rm -f "$LAYER_LIST"
+fi    # SKIP_EXTRACT
 
 # ---------- 基础收尾 ----------
 echo ""
@@ -366,12 +380,15 @@ say "已写 DNS：/etc/resolv.conf"
 if ! grep -q '^inet:x:3003:' "$ROOT/etc/group" 2>/dev/null; then
     echo 'inet:x:3003:' >> "$ROOT/etc/group"
     say "已补 inet 组（Android paranoid-network 要求，缺了 mysqld/redis 会 bind 失败）"
+fi
+
 # 补 /etc/hostname：docker 基础镜像里没有这个文件，宝塔安装器一上来就
 #   cat: /etc/hostname: No such file or directory
 # 虽然无害，但会让日志第一行就是红字，也干扰排查。
+# 【注意】这一段原来被嵌在上面那个 `if ! grep inet` 块里面（少一层缩进看不出来）——
+# 于是「inet 组已经存在」的重跑/用镜像的场景永远不会补 hostname。现在独立出来。
 if [ ! -s "$ROOT/etc/hostname" ]; then
     echo "openeuler" > "$ROOT/etc/hostname" 2>/dev/null && say "已补 /etc/hostname"
-fi
 fi
 
 # ---------- 验证 ----------
@@ -406,11 +423,18 @@ say "临时层目录已清理（下载文件留在 $WORK，重跑可复用）"
 echo ""
 echo "==================== rootfs 就绪 ===================="
 echo "注意：/proc /sys /dev /dev/pts /dev/shm 已经挂在 $ROOT 下并**故意留着**，"
-echo "      下一步安装脚本要 chroot 进去用。如果你要删掉这个 rootfs，先解挂载："
-echo "        sh $0 --root $ROOT --unmount"
-echo "      （不然 rm -rf 会报 \"Device or resource busy\"；重跑本脚本会自动先解挂载）"
+echo "      下一步安装脚本要 chroot 进去用。"
 echo ""
-echo "下一步（推荐直接跑 `./deploy.ps1`；手工的话）："
+echo "!!  要紧：$ROOT/dev 是**宿主 /dev 的绑定挂载**。"
+echo "    带着它 rm -rf，rm 会顺着挂载走进真 /dev，把设备节点删掉 ——"
+echo "    /dev/null 变普通文件、/dev/socket 消失 → 黑屏、只能靠 sysrq 重启救回来。"
+echo "    实测踩过三次（最近一次 2026-09-22，见 docs/pitfalls.md §六）。"
+echo "    要删这个 rootfs，**必须先解挂载、确认 0**："
+echo "        sh $0 --root $ROOT --unmount"
+echo "        mount | grep -c \"$ROOT/\"         # 必须输出 0"
+echo "    或者直接用： sh $0 --root $ROOT --clean   （它自己会先解挂载并断言）"
+echo ""
+echo "下一步（推荐直接跑 ./deploy.ps1；手工的话）："
 echo "  1) adb push install/. module/. tools/. 到同一个目录，例如"
 echo "     D=/data/local/tmp/qyt-repo   （/sdcard 是 CE 存储，重启后没解锁时不可用）"
 echo "  2) adb shell su -c \"sh \$D/install/qiyuntai-install.sh all\"   # 面板 + 组件 + 插件 + 补丁"

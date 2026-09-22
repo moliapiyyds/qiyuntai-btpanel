@@ -78,6 +78,31 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 > 这条是 2026-09-22 修的 —— 以前 `step_components` 是无条件执行，重跑一次要再等一个多小时。
 > 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb` / `-Dest`）、分步部署 → 见「三、部署」。
 
+> ⚠️ **从零装需要能连上宝塔的服务器 `download.bt.cn`**（安装器和面板包都从那儿下，
+> 这一步没法用别的源替代）。实测有人卡在这里，而且**前面的步骤全过了**：
+>
+> ```
+> [栖云台] 下载宝塔官方安装器（先落盘，不再 curl|bash）
+> curl: (6) Could not resolve host: download.bt.cn
+> ```
+>
+> 这**不代表**你整台手机 DNS 坏了 —— 同一份日志里 `dnf` 刚用同一个 `/etc/resolv.conf`
+> 从 openEuler 镜像装完 292 个包。它更像**单个域名**解析不到（DNS 污染 / 运营商拦截 /
+> 梯子的 split-DNS）。三条出路：
+>
+> 1. 在电脑或手机浏览器上把安装器下好，推过去再重跑（脚本会优先用它，不再联网下）：
+>    ```sh
+>    curl -fsSL -o install_panel.sh https://download.bt.cn/install/install_panel.sh
+>    adb push install_panel.sh /data/local/tmp/
+>    adb shell "su -c 'sh /data/local/tmp/qyt-repo/install/qiyuntai-install.sh panel'"
+>    # 别的路径也行： … install/qiyuntai-install.sh panel --installer /别的/install_panel.sh
+>    ```
+> 2. 换网络（Wi-Fi ↔ 流量）再试；挂了梯子/VPN 的话关掉再试一次。
+> 3. **直接走预制镜像那条路**（见上一节）—— 它完全不碰宝塔服务器。
+>
+> 装到这一步失败**不会白费**：rootfs、依赖都装好了，补上安装器再跑一次 `panel` 步骤就继续了
+> （脚本自己会把失败原因、当前 DNS 状态、以及上面这三条出路都打出来）。
+
 ---
 
 ## 一、这套东西是什么
