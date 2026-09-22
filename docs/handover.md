@@ -327,6 +327,12 @@ ic 'python3 --version; java -version; javac -version; node -v; npm -v'
 
 **从镜像装的那一遍额外验证的**：
 
+* **冷启动实测**（2026-09-22 08:00，真 `reboot` 之后没有做任何手动操作）：
+  `boot_completed=1` 后模块自己跑完 `service.sh` —— 日志里 fail2ban → crond → redis →
+  memcached → Tomcat（`用 JAVA_HOME=/usr/lib/jvm/java-17`）→ supervisord →
+  sshd（`启动成功，监听 :22`）→ 面板自检（`已响应（http://127.0.0.1:20318/b93838db）`）
+  全部成功；开机 3 分钟后 `netstat` 有 80/888/3306/6379/11211/8080/8005/22 八个端口在听，
+  面板 HTTP 200，`audit_env.sh` 的 11 项服务全部 `init✓ 进程✓`。
 * 端口 / 安全入口 / 用户名 / 密码 **每次都不一样** —— 三次实测分别是
   `26358 + /7318e9d4`（从零装）、`33733 + /b5cffaa3`（第一次 from-image）、
   `20318 + /b93838db`（重打镜像后的 from-image），
