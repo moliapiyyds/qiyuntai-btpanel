@@ -184,15 +184,23 @@ step_mount() {
     # 而同一份日志里 dnf 用的就是同一个 /etc/resolv.conf —— 也就是说不是整台机器 DNS 坏了，
     # 是那**一个**域名解析不到。这种「单域名解析失败」如果在开头就报出来，
     # 用户就不会白等 20 分钟，也不会误以为是 GitHub/梯子的问题。
+    #
+    # 2026-09-22 晚改口径：默认路径已经**只走预制镜像**（面板与组件都在镜像里编译好了），
+    # 所以这两个域名正常装机时**一个都不需要**：
+    #   download.bt.cn      —— 只有 `--from-source` 从源重建环境时才要（装面板与组件）
+    #   repo.openeuler.org  —— 只有 parity 步骤真发现缺包、要 dnf 补时才要（镜像里 547/547 全在）
+    # 所以这里只报状态、不当失败；解析不了也照样继续。
     local h
     for h in repo.openeuler.org download.bt.cn; do
         if in_chroot "getent hosts $h >/dev/null 2>&1"; then
             log "  DNS 解析 OK：$h"
         else
             warn "  DNS 解析不了：$h"
-            [ "$h" = "download.bt.cn" ] && warn "  （宝塔安装器与面板包都从这里下；这条不通的话，从零装会在最后一步断掉，见 step_panel 的提示）"
         fi
     done
+    if ! in_chroot "getent hosts download.bt.cn >/dev/null 2>&1"; then
+        log "  （正常，不用管：默认走预制镜像，不碰宝塔服务器；只有 --from-source 才需要它）"
+    fi
     log "挂载完成"
 }
 
