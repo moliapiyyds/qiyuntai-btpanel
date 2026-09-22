@@ -155,6 +155,41 @@ else
     bad "找不到 install/installer.lock"
 fi
 
+# ---------- 7b) image.lock 的格式 ----------
+# 镜像现在是**唯一交付路径**（见 README「为什么不走宝塔官方源」），而这张表是
+# 「下到半截 / 被换过」的唯一闸门 —— 它写坏了等于没有校验，所以单独查一遍。
+head_ "7b) install/image.lock 格式"
+if [ -f install/image.lock ]; then
+    n_bad=0; n_img=0; n_whole=0
+    while read -r kind _ name size sha _rest; do
+        case "$kind" in
+            ''|'#'*) continue ;;
+            image|whole) ;;
+            *) bad "不认识的类型：[$kind]（只允许 image / whole）"; n_bad=$((n_bad + 1)); continue ;;
+        esac
+        if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$'; then
+            bad "$kind $name 的 sha256 不是 64 位小写 hex：[${sha:-空}]"
+            n_bad=$((n_bad + 1))
+        fi
+        if ! printf '%s' "$size" | grep -Eq '^[0-9]+$'; then
+            bad "$kind $name 的字节数不是纯数字：[${size:-空}]"
+            n_bad=$((n_bad + 1))
+        fi
+        [ "$kind" = image ] && n_img=$((n_img + 1))
+        [ "$kind" = whole ] && n_whole=$((n_whole + 1))
+    done < install/image.lock
+    [ "$n_img" -gt 0 ] || bad "image.lock 里没有 image 数据行"
+    # 有分卷就必须有整包：deploy.sh 解包前拿它兜底，缺了就退化成「跳过校验」。
+    if [ "$n_img" -gt 0 ] && [ "$n_whole" = 0 ]; then
+        bad "有 image 行但没有 whole 行 —— 解包前的整包校验会变成「跳过」"
+    fi
+    if [ "$n_bad" = 0 ] && [ "$n_img" -gt 0 ] && [ "$n_whole" -gt 0 ]; then
+        pass "image.lock：$n_img 个分卷 + $n_whole 个整包，字段格式正确"
+    fi
+else
+    bad "找不到 install/image.lock（fetch-image.sh 和 deploy.sh 都靠它校验）"
+fi
+
 # ---------- 8) README 的「仓库结构」是否覆盖全部被跟踪文件 ----------
 head_ "8) README 仓库结构 vs 实际文件"
 if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then

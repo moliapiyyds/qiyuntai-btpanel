@@ -155,9 +155,31 @@ if [ "$DO_CLEAN" = "1" ]; then
         exit 1
     fi
     say "挂载已确认干净，开始删除"
-    rm -rf "$ROOT"
+    # 为什么要重试（2026-09-22 实测）：
+    #   unmount_all 用的是 `umount -l`（惰性卸载）—— 挂载立刻从命名空间里摘掉，
+    #   但**挂载点目录本身**要等引用释放完才能删。紧接着 rm -rf 就会看到
+    #     rm: /data/openeuler: Directory not empty
+    #     x 删除不完整，仍残留：dev
+    #   于是 --clean 判失败、deploy.sh 拒绝解包（那道防线是对的，见 pitfalls §六.2）。
+    #   真实的删除**成功了**（宿主 /dev 完好：256 项、/dev/null 还是字符设备），
+    #   只是残留了空的挂载点目录，所以这里给几次机会就够了，不必让用户去手动收拾。
+    try=0
+    while [ "$try" -lt 6 ]; do
+        rm -rf "$ROOT"
+        [ -d "$ROOT" ] || break
+        # 空的挂载点目录单独特判：有些情况 rm -rf 会跳过、rmdir 能删掉
+        # 用 glob 不用 `ls`：迭代 ls 的输出遇到含空格/换行的名字会散架（shellcheck SC2045）
+        for d in "$ROOT"/* "$ROOT"/.[!.]*; do
+            [ -e "$d" ] || continue
+            rmdir "$d" 2>/dev/null || true
+        done
+        try=$((try + 1))
+        [ -d "$ROOT" ] && sleep 1
+    done
     if [ -d "$ROOT" ]; then
         echo "x 删除不完整，仍残留：$(ls "$ROOT" 2>/dev/null | tr '\n' ' ')"
+        echo "  再看一眼是不是还有挂载： mount | grep \"$ROOT/\""
+        echo "  或者重启一次手机（惰性卸载会在重启时彻底落地），再跑同一个命令。"
         exit 1
     fi
     echo "完成。"

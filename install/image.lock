@@ -1,0 +1,32 @@
+# 栖云台预制镜像 —— 已核验清单
+#
+# 用途：install/fetch-image.sh 下载分卷后逐卷核对 sha256；deploy.sh 解包前核对整包。
+#
+# 为什么这张表是必须的（2026-09-22 定）：
+#   镜像现在是**唯一交付路径** —— 不再走宝塔官方安装器装面板。
+#   官方安装器那条路的问题不是「补丁会坏」，而是**面板版本不在我们手里**：
+#   它每次拉 bt 的当前版，今天 13.0.0、当天下午就变成 13.1.0，
+#   我们的补丁是版本门禁的（tools/moli_patch.py 的 PANEL_VERIFIED），
+#   于是一键部署会在 patch 步骤**明确失败**，要人工核验一遍才能放行。
+#   （实测：13.1.0 上锚点漂移 0/8，不是打不上，是没核验过就不自动打。）
+#   镜像把「面板版本」这个变量冻住，交付物才可复现。
+#
+# 格式（数据行，空格分隔）：
+#   image <tag> <文件名> <字节数> <sha256>     分卷
+#   whole <tag> <整包名> <字节数> <sha256>     分卷按文件名字母序拼接后的整包
+#
+# 换镜像的流程（跑完 tools/make_image.sh 之后，一步都不能省）：
+#   1) 把分卷上传到**新的 Release tag**
+#   2) sha256sum 每个分卷，以及 cat qyt-image.part-* | sha256sum 得到整包
+#   3) 把新的两行 + whole 一行追加到本文件末尾（新的在最后 = 默认用它）
+#   4) 旧行**保留**：老 Release 还在，别人可能正装着
+#
+# 时间        说明
+# 2026-09-22  v1.2.6 首发。openEuler 24.03 LTS-SP3 + 宝塔 13.0.0（未打补丁原版）
+#             镜像内已含：nginx/MariaDB10.11/PHP8.2/phpMyAdmin/Redis8.0.6/
+#             memcached1.6.45/Tomcat9.0.62/Node20.18.3 + 9 个面板插件
+#             解包 7983 MB；部署时只跑 creds/plugins/parity/patch/module，约 10 分钟
+#
+image v1.2.6 qyt-image.part-aaa 1992294400 e113c6653c81a764b8bc84ad3be9a8e1ee66377f0f59266b111a1358820a4130
+image v1.2.6 qyt-image.part-aab 235001052 672b6bab1a9b8dcd31dff35a6f66bfa8be8c65827e454eb26dc403059e6f7ee2
+whole v1.2.6 openeuler.tar.xz 2227295452 9f846cfa1ded8767d0b7e33722eb7546b7db08a8ddc70604fca60e04e7d4e284

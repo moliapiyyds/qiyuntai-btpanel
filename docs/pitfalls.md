@@ -87,6 +87,20 @@ if public.is_spider(): return abort(404)
 排查顺序：① 入口路径 + 完整浏览器 UA → 200，说明面板本身没问题，别再折腾面板；
 ② 仍然是 404，再去查 `data/admin_path.pl` 与 `data/port.pl`。
 
+> **2026-09-22 复现 + 补一条诊断路径**：新装的 13.1.0 上，除了入口路径，
+> `/login`、`/static/js/utils.js`、`/favicon.ico` 也全部 404，看着像**路由表整个坏了**。
+> 实际排查下来是这样排除的（值得照抄这个顺序，别一头扎进代码）：
+>
+> 1. `uri_match = re.compile(r"(^/static/…$|^/[\w_\./\-]*$)")` —— 入口路径和 `/login` 都**匹配**，
+>    不是白名单拦的（`before_request` 里那条 `if not uri_match.match(...): abort(404)`）。
+> 2. `public.check_ip_panel()` / `public.check_domain_panel()` —— 两个函数开头都有
+>    `if client_ip in ['127.0.0.1','localhost','::1']: return False`，本机探测**不会被拦**
+>    （而且 IP 那条返回的是 403 不是 404）。
+> 3. 剩下的唯一闸门就是 `login()` 里的 `if public.is_spider(): return abort(404)` ——
+>    换成浏览器 UA 立刻 200 `<title>宝塔Linux面板</title>`。
+>
+> 顺带确认：**13.0.0 与 13.1.0 行为一致**，这不是版本差异。
+
 ### 7. 破解点（本仓库做法）
 * **等级显示**：前端 `utils.js` 用 cookie 判断——
   ```js
@@ -639,5 +653,104 @@ echo b > /proc/sysrq-trigger
 > 仓库里 `make_image.sh`、`uninstall.sh --purge`、`prepare-rootfs.sh --clean` 都有这个断言，
 > **我自己的临时测试脚本没有** —— 三次事故全部发生在「仓库脚本之外的临时操作」里。
 > 临时脚本要么走 `--unmount` 再删，要么干脆别删（重启后挂载自然消失）。
+
+---
+
+## 七、交付路线：为什么改成一镜像到底（2026-09-22 决定）
+
+### 1. 面板版本不在我们手里 → 补丁会在 patch 步骤失败
+
+我们的补丁（`tools/moli_patch.py`）是**版本门禁**的：`PANEL_VERIFIED = ['13.0.0']`，
+不在这张表里的版本直接 `return 2` 失败，提示「要人工核验后加 `--force`」。
+这是故意设计的 —— 补丁按「文件路径 + 函数名 + 代码片段」打，
+静默打出半个（企业版显出来了、关更新却没生效）比彻底失败更坏。
+
+而宝塔官方安装器每次拉的是**当前**版本。实测：
+
+| 日期 | 官方安装器脚本 sha256 | 装出来的面板版本 |
+|---|---|---|
+| 2026-09-21 | `95ed59e4…`（命中 installer.lock） | `13.0.0` |
+| 2026-09-22 | `95ed59e4…`（**同一个**，仍命中） | **`13.1.0`** |
+
+安装器脚本没变，**面板包变了**（官方包记录 hash `cbc70db3…`，官方更新于 2026/09/18）。
+于是当天走官方源的一键部署会在 `patch` 步骤失败：
+
+```
+[失败] 本补丁只在本机实测适配过：13.0.0
+        当前面板是「13.1.0」。
+        人工核验过再继续：加 --force
+```
+
+**关键修正**：加 `--force` 实测，13.1.0 上**锚点漂移是 0/8** —— 8 项校验全正常
+（永久企业版 / no-store / 免绑定视图 / 数据层 / 账户接口 / 去除更新 / 前端兜底 4 文件 /
+浏览器版本门），4 个 py 文件语法 OK，254 个 JS 版本戳都更新了。
+
+所以准确的说法是：**问题不是「补丁会坏」，而是「版本不可控 → 交付物不可复现 →
+每次宝塔发版都要人工重核验一遍」**。镜像解决的是这个，不是兼容性。
+
+结论：一键部署只走预制镜像，官方源那条退到 `deploy.sh --from-source`，只给作者重建环境用。
+
+### 2. 手机直连 GitHub 下大附件：卡在 `github.com` 那一跳，且是**间歇性**的
+
+镜像 2.2 GB 分两卷存在 Release（`qyt-image.part-aaa` 1900 MB + `-aab` 224 MB）。
+2026-09-22 在手机上实测同一份脚本、同一个 URL 的两种结果：
+
+| 时间 | 结果 |
+|---|---|
+| 18:52 ~ 18:56 | `part-aaa` **5 次全部** `wget: download timed out`，一个字节都没传（日志里连百分比都没有） |
+| 19:00 之后 | 同样两条 URL，**30 秒下了 337 MB**（≈11 MB/s），3 分钟下完整卷 |
+
+同一时刻用 chroot 里的 curl 探测，拿到的是决定性证据：
+
+```
+curl: (28) Failed to connect to github.com port 443 after 15001 ms: Timeout was reached
+```
+
+而 **CDN 那一跳是通的**（`objects.githubusercontent.com` / `release-assets.githubusercontent.com`
+都是 185.199.108-111.133，`connect=0.09s`），482 字节的小文件能下，说明：
+**坏的是 `github.com` 的跳转/连接，间歇性；不是 CDN 也不是 DNS。**
+
+修法（已落地到 `install/fetch-image.sh`）：
+
+* 断点续传（`curl -C -` / `wget -c`）+ 重试，`--tries 0` = **一直试到成功**（可以挂着去睡觉）
+* 每次失败都打印「已落盘 X MB / 共 Y MB」，让「在往前走」这件事可见
+* **失败时绝不删半截文件** —— 删了就等于把断点续传的价值抹掉
+
+> 这条同时修掉了一个我自己写出来的 bug：最早的版本在「试满 N 次仍失败」时执行了
+> `rm -f "$F"`，也就是**在最需要续传的时候把续传数据删掉**。现在只有「大小对但哈希不对」
+> 才会删（那种情况确实是坏数据）。
+
+另外验证过但**没采用**的兜底：`api.github.com` 拿 asset id 再取（`Accept: application/octet-stream`）。
+没采用的理由是实测坏窗口是**按时间**来的 —— 坏的时候 github.com 与 api.github.com 一起坏，
+好的时候一起好，多一跳不解决问题。真要换源就用 `-u/--image-url` 指自己的镜像站。
+
+### 3. 往设备推的脚本**不能出现中文**
+
+2026-09-22 实测：把带中文的脚本用 `Out-File/Set-Content -Encoding ascii` 落盘再 `adb push`，
+中文会被写成 `?`，而且**会把 shell 语法搞断**：
+
+```
+/data/local/tmp/qyt_unit.sh[56]: bin: not found
+/data/local/tmp/qyt_unit.sh[56]: OK: not found
+sh: /install/fetch-image.sh: No such file or directory     # $REPO 直接被清空了
+```
+
+设备侧脚本一律**纯 ASCII 标签**（`===== T1: ... =====` 之类），中文留给文档和
+仓库里已经在设备上的 UTF-8 文件（那些是 `adb push` 直传、不经编码转换，没问题）。
+
+### 4. 改过 `.ps1` 之后必须补回 UTF-8 BOM
+
+`deploy.ps1` 自己头部就写着这条，但**编辑工具保存时会丢掉 BOM**。丢了之后 PowerShell 5.1
+按 GBK 解析，报一堆看不懂的语法错：
+
+```
+Unexpected token '}' in expression or statement. @ line 116
+The token '&&' is not a valid statement separator in this version. @ line 159
+Missing closing '}' in statement block or type definition. @ line 173
+```
+
+（而那几行本身完全正常 —— 全是编码把多字节字符拆坏导致的。）
+`tools/ci.sh` 第 6 项会抓这个：`前 3 字节 = efbbbf`。
+补 BOM 的办法：`[IO.File]::WriteAllText($p, $t, [Text.UTF8Encoding]::new($true))`。
 
 

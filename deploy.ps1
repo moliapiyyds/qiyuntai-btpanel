@@ -12,21 +12,23 @@
 #      默认推到 /data/local/tmp/qyt-repo —— **不是 /sdcard**，原因见下面「推送到哪」那段
 #      tools/ 是必须的：step_plugins 要用 tools/plugin_install.py、
 #      step_patch 要用 tools/moli_patch.py
-#   3) 在手机上跑 install/deploy.sh —— 剩下的全自动：
-#        铺 rootfs → 装面板 → 装组件（源码编译 OpenResty/MariaDB/PHP/phpMyAdmin）
-#        → 装 9 个面板插件 → 基线包对齐 → 打补丁 → 装 KernelSU 模块 → 重启
-#      耗时约 2 小时（MariaDB 编译峰值约 2 GB 内存）。
-#      装第二台可以先打预制镜像再用 deploy.sh --from-image，约 10 分钟：
-#        sh tools/make_image.sh --out /data/qyt_image
-#        sh <Dest>/install/deploy.sh --from-image /data/qyt_image
-#   4) 收尾提示
+#   3) 预制镜像分卷：电脑上下（约 2.2 GB，下完 adb push 到 /data/local/tmp/qyt-image）。
+#      手机上已经有且校验通过就跳过。**这是交付的唯一路径** —— 不走宝塔官方安装器了，
+#      理由见 README「为什么不走宝塔官方源」。
+#   4) 在手机上跑 install/deploy.sh --from-image —— 解包 → 重新随机化端口/入口/密码/
+#      sshd 主机密钥 → 插件 → 基线包对齐 → 打补丁 → 装 KernelSU 模块 → 重启。约 10 分钟。
+#      （目标 /data/openeuler 非空会拒绝解包：先跑 install/prepare-rootfs.sh --clean）
 #
 # 参数：
-#   -Check        只检查设备和环境，不推送、不安装
-#   -PushOnly     只推文件到手机，不安装
-#   -NoReboot     装完不自动重启手机
-#   -Adb <path>   指定 adb 路径（默认自动找）
-#   -Dest <path>  推到哪儿（默认 /data/local/tmp/qyt-repo；手机已解锁时 /sdcard/qyt-repo 也行）
+#   -Check          只检查设备和环境，不推送、不安装
+#   -PushOnly       只推文件（仓库 + 镜像分卷）到手机，不安装
+#   -NoReboot       装完不自动重启手机
+#   -Adb <path>     指定 adb 路径（默认自动找）
+#   -Dest <path>    仓库推到哪儿（默认 /data/local/tmp/qyt-repo）
+#   -ImageDir <path>   镜像分卷放手机哪儿（默认 /data/local/tmp/qyt-image）
+#   -ImageUrl <url>    镜像从哪下（默认 GitHub Release；自建镜像站/网盘直链都行）
+#
+# 电脑侧缓存：分卷下到 _dist\image\（已在 .gitignore 里），校验通过后不重复下。
 #
 # 关于 root：脚本先试 `adb shell id`，已经是 uid=0 就直接执行；
 # 否则才退回 `su -c`。两种都拿不到 root 才报错。
@@ -47,12 +49,18 @@ param(
     [switch]$PushOnly,
     [switch]$NoReboot,
     [string]$Adb = '',
-    [string]$Dest = ''
+    [string]$Dest = '',
+    [string]$ImageDir = '',
+    [string]$ImageUrl = ''
 )
 
 $ErrorActionPreference = 'Continue'
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:SU = ''
+
+# 镜像分卷放手机哪儿 / 电脑侧缓存目录（缓存已在 .gitignore 里）
+if (-not $ImageDir) { $ImageDir = '/data/local/tmp/qyt-image' }
+$ImageCache = Join-Path $RepoRoot '_dist\image'
 
 # 推送到哪：默认 /data/local/tmp/qyt-repo。
 # 为什么不用 /sdcard（2026-09-22 实测踩到）：/sdcard 是 **CE 存储**
@@ -191,25 +199,111 @@ foreach ($need in @('plugin_install.py', 'moli_patch.py')) {
     if (($r | Out-String) -notmatch 'yes') { Die "手机上缺 $Dest/tools/$need —— step_plugins/step_patch 会失败" }
 }
 
+# ---------- 4.5) 预制镜像分卷 ----------
+# 交付只剩这一条路（理由见 README「为什么不走宝塔官方源」），所以电脑这条路必须
+# 把 2.2 GB 分卷一起准备好：电脑下得快也稳，下完 adb push 过去。
+# 手机上已经有了（且校验通过）就跳过 —— 重跑是安全的。
+Write-Host ""
+Write-Host "---- 预制镜像分卷 ----"
+$imgOk = $false
+RemoteRun "sh $Dest/install/fetch-image.sh -d $ImageDir --check" 2>&1 | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    Ok "手机上分卷已就绪且校验通过（跳过下载与推送）"
+    $imgOk = $true
+}
+if (-not $imgOk) {
+    $lock = Join-Path $RepoRoot 'install\image.lock'
+    if (-not (Test-Path $lock)) { Die "缺 install\image.lock（镜像哈希清单，取件和校验都靠它）" }
+    $rows = @(Get-Content $lock -Encoding UTF8 | Where-Object { $_ -match '^image\s' })
+    if ($rows.Count -eq 0) { Die "install\image.lock 里没有 image 数据行" }
+    $tag = ($rows[-1] -split '\s+')[1]
+    $parts = @()
+    foreach ($r in $rows) {
+        $f = $r -split '\s+'
+        if ($f[1] -eq $tag) { $parts += [pscustomobject]@{ name = $f[2]; size = [int64]$f[3]; sha = $f[4] } }
+    }
+    if ($parts.Count -eq 0) { Die "install\image.lock 里没有 tag=$tag 的分卷" }
+    if (-not $ImageUrl) { $ImageUrl = "https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$tag" }
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+        Die "找不到 curl.exe（Windows 10 1803+ 自带）。装一个 curl 或改用 deploy-linux.sh"
+    }
+    New-Item -ItemType Directory -Force -Path $ImageCache | Out-Null
+    Say "镜像 tag ：$tag"
+    Say "缓存目录 ：$ImageCache（已下好且校验通过的会跳过，可以反复跑）"
+    Say "手机目标 ：$ImageDir"
+
+    function Test-Part($path, $size, $sha) {
+        if (-not (Test-Path $path)) { return $false }
+        if ((Get-Item $path).Length -ne $size) { return $false }
+        if (-not $sha) { return $true }
+        return ((Get-FileHash $path -Algorithm SHA256).Hash -eq $sha.ToUpper())
+    }
+
+    foreach ($p in $parts) {
+        $f = Join-Path $ImageCache $p.name
+        if (Test-Part $f $p.size $p.sha) { Ok "$($p.name) 已在缓存里且校验通过"; continue }
+        Say "下载 $($p.name)（$([int]($p.size / 1MB)) MB，断点续传）"
+        $try = 0
+        while ($true) {
+            & curl.exe -L --fail -C - --connect-timeout 20 --retry 2 --retry-delay 3 --progress-bar -o $f "$ImageUrl/$($p.name)" 2>&1 | Out-Null
+            if (Test-Part $f $p.size $p.sha) { break }
+            $try++
+            if ($try -ge 8) {
+                Die "$($p.name) 下不动或校验不过（缓存：$f）。
+      删掉那个文件再重跑；或者 -ImageUrl <基址> 换源；
+      或者干脆让手机自己下：手机上跑 install/fetch-image.sh --tries 0"
+            }
+            $have = if (Test-Path $f) { (Get-Item $f).Length } else { 0 }
+            Warn "第 $try 次没成（已下 $([int]($have / 1MB)) MB），续传重试"
+            Start-Sleep -Seconds 2
+        }
+        Ok "$($p.name) 下载完成并校验通过"
+    }
+
+    # 顺手把两个小清单也取下来（给 deploy.sh 打印清单用，非致命）
+    foreach ($extra in @('SHA256SUMS.txt', 'IMAGE-MANIFEST.txt')) {
+        $fe = Join-Path $ImageCache $extra
+        if (-not (Test-Path $fe)) {
+            & curl.exe -L --fail -s -o $fe "$ImageUrl/$extra" 2>&1 | Out-Null
+        }
+    }
+
+    Say "推到手机 $ImageDir（2.2 GB 走 USB，看着进度条等它）"
+    RemoteRun "mkdir -p $ImageDir" | Out-Null
+    foreach ($p in $parts) {
+        & $Adb -s $serial push (Join-Path $ImageCache $p.name) "$ImageDir/$($p.name)" 2>&1 | Select-Object -Last 1
+    }
+    foreach ($extra in @('SHA256SUMS.txt', 'IMAGE-MANIFEST.txt')) {
+        $fe = Join-Path $ImageCache $extra
+        if (Test-Path $fe) { & $Adb -s $serial push $fe "$ImageDir/$extra" 2>&1 | Select-Object -Last 1 }
+    }
+    RemoteRun "sh $Dest/install/fetch-image.sh -d $ImageDir --check" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Die "推到手机后校验没通过。看细节：
+      $Adb -s $serial shell `"sh $Dest/install/fetch-image.sh -d $ImageDir --check`""
+    }
+    Ok "手机上分卷已就绪（校验通过）"
+}
+
 if ($PushOnly) {
     Write-Host ""
     Write-Host "---- -PushOnly：文件已推好，没有安装 ----"
     Write-Host "继续（手机上执行）："
-    Write-Host "   $Adb -s $serial shell `"sh $Dest/install/deploy.sh`""
+    Write-Host "   $Adb -s $serial shell `"sh $Dest/install/deploy.sh --from-image $ImageDir`""
     Write-Host "或者在这里直接跑： $hint"
     exit 0
 }
 
 # ---------- 5) 在手机上跑 ----------
 Write-Host ""
-Write-Host "---- 手机上开始部署 ----"
-Write-Host "     这一步最慢：dnf 装编译依赖 + 源码编译 OpenResty / MariaDB / PHP"
-Write-Host "     MariaDB 编译峰值约 2 GB 内存，装之前最好清一下后台"
+Write-Host "---- 手机上开始部署（从预制镜像铺）----"
+Write-Host "     约 10 分钟：解包 + 重新随机化身份 + 插件/基线对齐/补丁/模块"
+Write-Host "     如果这一步说 /data/openeuler 非空，先清旧的："
+Write-Host "       $Adb -s $serial shell `"su -c 'sh $Dest/install/prepare-rootfs.sh --clean'`""
 Write-Host ""
-$extra = ''
-if ($NoReboot) { $extra = ' --no-reboot' }
+$extra = " --from-image $ImageDir"
+if ($NoReboot) { $extra = "$extra --no-reboot" }
 RemoteRun "sh $Dest/install/deploy.sh$extra"
-$rc = $LASTEXITCODE
 $rc = $LASTEXITCODE
 
 Write-Host ""

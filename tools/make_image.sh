@@ -23,7 +23,7 @@
 #   sh tools/make_image.sh                      # 默认输出到 /data/qyt_image
 #   sh tools/make_image.sh --out /sdcard/qyt_image
 #   sh tools/make_image.sh --no-clean           # 不清理编译残留（镜像会大很多）
-#   sh tools/make_image.sh --part-mb 1900       # 每卷大小（GitHub 附件上限 2GiB）
+#   sh tools/make_image.sh --part-mb 1900       # 每卷大小（默认 500 MB，见下）
 #
 # 退出码：0 成功；1 前置条件不满足（含"还有挂载没解"）；2 打包过程失败
 # ============================================================
@@ -31,7 +31,14 @@ set -u
 
 ROOT=/data/openeuler
 OUT=/data/qyt_image
-PART_MB=1900                 # GitHub Release 单附件上限 2 GiB，留点余量
+# 每卷大小：默认 500 MB。
+# 以前默认 1900 MB（贴着 GitHub 单附件 2 GiB 的上限）。2026-09-22 改小，原因是
+# 镜像成了**唯一交付路径**，而手机直连 GitHub 下大附件会碰到 `github.com` 那一跳
+# 间歇性连不上（实测：同一条 URL，5 次全部 connect timeout；过几分钟又 11 MB/s 跑满）。
+# 卷越大，撞上坏窗口时一次废掉的越多、续传要重来的比例越高。
+# 1900 MB 是「为上传省事」优化的；500 MB 是「为下载可靠」优化的 —— 下载端更难伺候。
+# 现在的 v1.2.6 镜像是改之前打的（2 卷：1900 MB + 224 MB），仍然能用。
+PART_MB=500
 DO_CLEAN=1
 CHENV='HOME=/root PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin TERM=xterm LANG=C.UTF-8'
 
@@ -285,16 +292,30 @@ echo ""
 } > "$OUT/SHA256SUMS.txt"
 ok "已写 $OUT/SHA256SUMS.txt"
 
+# ---------- 直接给出 install/image.lock 要追加的行 ----------
+# 为什么要打出来：镜像是唯一交付路径，而 fetch-image.sh / deploy.sh 都按 image.lock
+# 核对哈希 —— 换镜像忘了更新那张表，取件和解包都会被自己的校验拒绝。这里把
+# 「可以直接粘进 install/image.lock」的几行准备好，避免手抄 64 位哈希。
+echo ""
+echo "---- 把下面几行追加到 install/image.lock（\\\$TAG 换成这次的 Release tag）----"
+for f in "$OUT"/qyt-image.part-*; do
+    echo "image \$TAG $(basename "$f") $(wc -c < "$f" | tr -d ' ') $($BB sha256sum "$f" | $BB cut -d' ' -f1)"
+done
+echo "whole \$TAG $(basename "$ARCH") $SIZE $WHOLE"
+
 echo ""
 echo "============================================================"
 echo " 完成"
-echo " 镜像整包 : $ARCH（$(($SIZE / 1048576)) MB）"
-echo " 分卷     : $OUT/qyt-image.part-*（$NPART 卷）"
+# 别用 $((SIZE / 1048576))：shell 的 $(( )) 是 32 位有符号，
+# 2.2 GB 的字节数（> 2^31）会溢出成负数（实测打出过「-1971 MB」）。
+echo " 镜像整包 : $ARCH（$(awk -v b="$SIZE" 'BEGIN{printf "%.0f", b/1048576}') MB）"
+echo " 分卷     : $OUT/qyt-image.part-*（$NPART 卷，每卷 $PART_MB MB）"
 echo " 清单     : $MANI"
 echo " 校验     : $OUT/SHA256SUMS.txt"
 echo ""
 echo " 上传 Release（在电脑上）："
 echo "   gh release upload <tag> $OUT/qyt-image.part-* $OUT/SHA256SUMS.txt $MANI \\"
 echo "      -R moliapiyyds/qiyuntai-btpanel"
+echo " 然后把上面那几行追加进 install/image.lock 并提交 —— 否则校验会拒绝这份新镜像。"
 echo "============================================================"
 exit 0

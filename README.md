@@ -16,6 +16,11 @@
 
 前置：手机 **arm64**、已 root（KernelSU / KernelSU-Next / Magisk）、`/data` 空闲 **≥ 20 GB**。
 
+交付走 **预制镜像**：整套 openEuler + 宝塔环境（面板、组件、9 个插件都编译好了）打包成 2.2 GB 的镜像，
+装一台约 **10 分钟**。面板版本**冻在镜像里**（13.0.0），不受宝塔发版影响，也不需要连宝塔的服务器。
+
+> 为什么不再从宝塔官方装：见下面「为什么不走宝塔官方源」。
+
 ### 电脑是 Windows
 
 ```powershell
@@ -41,44 +46,65 @@ cd qiyuntai-btpanel
 没有 adb 的话：Debian/Ubuntu `sudo apt install android-tools-adb`，macOS `brew install android-platform-tools`。
 （`deploy-linux.sh` 与 `deploy.ps1` 是两个等价入口，做的事完全一样，改一个记得改另一个。）
 
+**电脑侧是最稳的一条路**：2.2 GB 的镜像由电脑下（Release 附件在电脑上很稳），下完自动 `adb push` 到手机再装。
+
 ### 没有电脑：纯手机终端（一行）
 
 在手机上用 root 终端（KernelSU/Magisk 自带的、或者 Termux `su -c`、或者 `adb shell` 都行）：
 
 ```sh
-su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); T=/data/local/tmp/qyt.tgz; $BB wget -O $T https://codeload.github.com/moliapiyyds/qiyuntai-btpanel/tar.gz/refs/heads/main && mkdir -p /data/local/tmp/qyt-repo && $BB tar -xzf $T -C /data/local/tmp/qyt-repo --strip-components=1 && sh /data/local/tmp/qyt-repo/install/deploy.sh'
+su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); T=/data/local/tmp/qyt.tgz; $BB wget -O $T https://codeload.github.com/moliapiyyds/qiyuntai-btpanel/tar.gz/refs/heads/main && mkdir -p /data/local/tmp/qyt-repo && $BB tar -xzf $T -C /data/local/tmp/qyt-repo --strip-components=1 && sh /data/local/tmp/qyt-repo/install/fetch-image.sh && sh /data/local/tmp/qyt-repo/install/deploy.sh'
 ```
 
-它自己会：拉仓库（`codeload.github.com`，实测通）→ 解到 `/data/local/tmp/qyt-repo` →
-`install/deploy.sh` 接着铺 rootfs（清华镜像）→ 装面板/组件/插件 → 打补丁 → 装模块 → 重启。
-**想在手机上跑之前先只体检**：把最后那句换成 `sh /data/local/tmp/qyt-repo/install/deploy.sh --check`。
+它串起来的是三步，每步都能单独重跑（**重跑是安全的**）：
 
-### 最快的一条：预制镜像（约 10 分钟，且不连宝塔服务器）
+| 步骤 | 干什么 | 重跑会怎样 |
+|---|---|---|
+| 拉 `codeload.github.com` 的仓库 tar | 解到 `/data/local/tmp/qyt-repo` | 覆盖，无所谓 |
+| `install/fetch-image.sh` | 下 2.2 GB 镜像分卷到 `/data/local/tmp/qyt-image`，逐卷 + 整包核 sha256 | 已下好的**跳过**；下坏的自动删掉重下；断线**断点续传** |
+| `install/deploy.sh` | 解包 → 随机化端口/入口/密码/sshd 密钥 → 插件/基线对齐/补丁/模块 → 重启 | 目标 `/data/openeuler` 非空会**拒绝**解包（要先清，见下） |
 
-镜像也能让手机自己下 —— **但这条路不稳，得看运气**：Release 附件走的是
-`objects.githubusercontent.com`，实测同一 URL 有时下得动（482 字节的小校验和、235 MB 的分卷都成功过），
-有时**连着 5 次都是 `Connection reset by peer`**。所以能下就下，下不动就重试，或者干脆从电脑下（见上面 Windows/Linux 那两节）：
+**想先只体检**：把最后那句换成 `sh /data/local/tmp/qyt-repo/install/deploy.sh --check`。
 
-```sh
-su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|head -1); D=/data/local/tmp/qyt_image; V=v1.2.6; mkdir -p $D; for p in aaa aab; do $BB wget -O $D/qyt-image.part-$p https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/qyt-image.part-$p; done; $BB wget -O $D/SHA256SUMS.txt https://github.com/moliapiyyds/qiyuntai-btpanel/releases/download/$V/SHA256SUMS.txt; sh /data/local/tmp/qyt-repo/install/deploy.sh --from-image $D'
-```
+> 手机直连 GitHub 下 2.2 GB 偶尔会断（Release 附件走 `objects.githubusercontent.com`，
+> 实测有时 5 次都 `Connection reset by peer`）。`fetch-image.sh` 会**断点续传 + 重试 5 次**，
+> 实在下不动就换电脑侧那条路，或者手动把分卷推进 `/data/local/tmp/qyt-image` 再跑 `--check` 验一下。
 
-> 前置：上面「纯手机终端」那一步已经跑过（`/data/local/tmp/qyt-repo` 里要有仓库），
-> 或者已经在电脑上 `--push-only` 推过（见「三、部署」）。
+### 为什么不走宝塔官方源
 
-三条路剩下的都全自动：找 adb / 等设备 / 探 root → 推 `install/` + `module/` + `tools/` →
-手机上铺 rootfs（或从镜像解包）→ 装面板/组件 → 装 9 个面板插件 + memcached + Tomcat
-→ 基线包对齐 → 打补丁 → 装 KernelSU 模块 → **自动重启**。
-重启后点模块的「执行」按钮，地址和账号密码会直接打印出来。
+2026-09-22 定：**一键部署只走预制镜像**。原因是官方安装器那条路「面板版本不在我们手里」：
 
-> 从零装耗时较长（OpenResty / MariaDB / PHP 都是源码编译，**MariaDB 编译峰值约 2 GB 内存**，总共约 2 小时）；
-> 用预制镜像约 **10 分钟**。
-> **重跑是安全的**：面板 / 组件 / 插件 / 模块 / init 脚本都已经装好的会自动跳过
-> （实测 `components` 步骤重跑 **1 秒**跑完，不会重新编译；rootfs 也跳过）。
+- 官方安装器每次拉的是宝塔的**当前**版本。实测 2026-09-21 装到 `13.0.0`，**2026-09-22 当天就变成 `13.1.0`**。
+- 我们的补丁是**版本门禁**的（`tools/moli_patch.py` 里的 `PANEL_VERIFIED`）。装到没核验过的版本，
+  它会直接失败并提示「要人工核验后加 `--force`」—— 这是故意的：补丁按「文件路径 + 函数名 +
+  代码片段」打，静默打出半个（企业版显出来了、关更新却没生效）比彻底失败更坏。
+- 于是走官方源的一键部署会在 `patch` 步骤**失败**，得人工核验一遍才能放行。
+
+> 顺带一个实测数据：`13.1.0` 上补丁的**锚点漂移是 0/8**（8 项校验全正常、4 个 py 文件语法 OK）。
+> 所以问题**不是「补丁会坏」**，而是「版本不可控 → 交付物不可复现 → 每次发版都要重核验一遍」。
+> 镜像解决的是这个。
+
+镜像还顺带解决两件事：**不依赖宝塔服务器**（有人卡在 `download.bt.cn` 解析不到，见下）、
+装一台从约 2 小时压到约 **10 分钟**。
+
+> **重跑是安全的**：面板 / 组件 / 插件 / 模块 / init 脚本都已装好的会自动跳过
+> （实测 `components` 步骤重跑 **1 秒**跑完，不会重新编译）。
 > 这条是 2026-09-22 修的 —— 以前 `step_components` 是无条件执行，重跑一次要再等一个多小时。
 > 参数（`-Check` / `-PushOnly` / `-NoReboot` / `-Adb` / `-Dest`）、分步部署 → 见「三、部署」。
 
-> ⚠️ **从零装需要能连上宝塔的服务器 `download.bt.cn`**（安装器和面板包都从那儿下，
+### 【作者用】从源重建环境（`--from-source`，别给用户跑）
+
+镜像里的环境是这么造出来的：铺 openEuler rootfs → 用**宝塔官方安装器**装面板 → 装组件（源码编译）
+→ 装 9 个插件 → 基线包对齐 → 打补丁 → 打包成镜像。重建时在手机 root shell 里：
+
+```sh
+su -c 'sh /data/local/tmp/qyt-repo/install/deploy.sh --from-source'          # 约 2 小时
+su -c 'sh /data/local/tmp/qyt-repo/tools/make_image.sh --out /data/qyt_image' # 打包
+```
+
+`--from-source` 是**唯一**还会碰宝塔服务器的路径，所以下面这段排错仍然有效：
+
+> ⚠️ **从源装需要能连上宝塔的服务器 `download.bt.cn`**（安装器和面板包都从那儿下，
 > 这一步没法用别的源替代）。实测有人卡在这里，而且**前面的步骤全过了**：
 >
 > ```
@@ -98,10 +124,13 @@ su -c 'BB=$(ls /data/adb/ksu/bin/busybox /data/adb/magisk/busybox 2>/dev/null|he
 >    # 别的路径也行： … install/qiyuntai-install.sh panel --installer /别的/install_panel.sh
 >    ```
 > 2. 换网络（Wi-Fi ↔ 流量）再试；挂了梯子/VPN 的话关掉再试一次。
-> 3. **直接走预制镜像那条路**（见上一节）—— 它完全不碰宝塔服务器。
+> 3. **直接走预制镜像**（用户装机就该走这条）—— 它完全不碰宝塔服务器。
 >
 > 装到这一步失败**不会白费**：rootfs、依赖都装好了，补上安装器再跑一次 `panel` 步骤就继续了
 > （脚本自己会把失败原因、当前 DNS 状态、以及上面这三条出路都打出来）。
+
+> 重建完记得把新镜像的哈希追加到 `install/image.lock`（分卷 + 整包都要），
+> 否则 `fetch-image.sh` / `deploy.sh` 的校验会**拒绝**新镜像。添加流程写在这个文件头部。
 
 ---
 
@@ -177,26 +206,34 @@ cd qiyuntai-btpanel
 ```
 1) 找 adb → 等设备 → 确认手机上能拿到 root → 查架构与磁盘
 2) 把 install/ module/ tools/ 推到手机（同一层目录）
-3) 在手机上跑 install/deploy.sh，自动完成：
-     铺 openEuler rootfs（清华镜像）
-     → 挂载 chroot → dnf 装编译依赖
-     → 宝塔官方脚本装面板
-     → 装 OpenResty / MariaDB / PHP / phpMyAdmin
-     → 装 9 个面板插件 + 从宝塔源码包编 memcached 1.6.45
-     → 基线包对齐（按 install/baseline-packages.txt 逐名补齐）
+3) 预制镜像分卷：电脑下到 _dist/image/（校验通过不重复下）→ adb push 到手机
+   → 在手机上再核一遍 sha256。手机上已经有且校验通过就整段跳过
+4) 在手机上跑 install/deploy.sh --from-image，自动完成：
+     校验分卷（sha256 对不上就拒绝解包）
+     → 解包（约 15 分钟，busybox xz 单线程）
+     → 重新随机化端口 / 安全入口 / 用户名 / 密码 / sshd 主机密钥
+     → 9 个面板插件核对 → 基线包对齐（按 install/baseline-packages.txt 逐名补齐）
      → 打补丁（永久企业版 / 关闭更新 / 免绑定）+ 服务兼容层 + 装 3 个自备 init 脚本 + sshd 配置
      → 装 KernelSU 模块
-4) 自动重启手机
+5) 自动重启手机（重启后模块的 service.sh 拉起 11 个服务）
 ```
 
-耗时较长（源码编译 OpenResty / MariaDB / PHP），**MariaDB 编译峰值约 2 GB 内存**。
+装一台约 **10 分钟**（镜像里面板和组件都已编译好，跳过 dnf 与全部源码编译）。
+从源装（`--from-source`，作者重建环境用）才是约 2 小时、**MariaDB 编译峰值约 2 GB 内存**。
 
 | 参数 | 作用 |
 | --- | --- |
 | `-Check` | 只体检（设备 / root / 架构 / 磁盘），不推不装 |
-| `-PushOnly` | 只把文件推到手机，安装你自己来 |
+| `-PushOnly` | 只把仓库与镜像分卷推到手机，安装你自己来 |
 | `-NoReboot` | 装完不自动重启 |
 | `-Adb <路径>` | 指定 adb（默认自动找 `tools\adb\adb.exe`、`PATH`、常见安装位置） |
+| `-ImageDir <路径>` | 镜像分卷放手机哪儿（默认 `/data/local/tmp/qyt-image`） |
+| `-ImageUrl <url>` | 镜像从哪下（默认 GitHub Release；自建镜像站/网盘直链都行） |
+
+`deploy-linux.sh` 是等价入口（`--check` / `--push-only` / `--no-reboot` / `--adb` / `--dest` /
+`--image-dir` / `--image-url`）。`install/deploy.sh` 自己另有一组参数：
+`--from-image <dir>` / `--image-url` / `--image-sha` / `--no-fetch` / `--no-reboot`，
+以及作者用的 `--from-source`。
 
 **不想 clone 的，一行搞定**（PowerShell）：
 
@@ -204,22 +241,16 @@ cd qiyuntai-btpanel
 $d="$env:TEMP\qyt"; Invoke-WebRequest -UseBasicParsing 'https://github.com/moliapiyyds/qiyuntai-btpanel/archive/refs/heads/main.zip' -OutFile "$d.zip"; Expand-Archive "$d.zip" $d -Force; & "$d\qiyuntai-btpanel-main\deploy.ps1"
 ```
 
-> **为什么还推荐在电脑侧准备？**
-> 手机侧自举现在也能用（见首页「纯手机终端」那节），但**这个结论变过一次，值得记下来**：
-> * 2026-09-21 实测：手机上的 `busybox wget` 连 `github.com` 会被重置
->   （`wget: got bad TLS record (len:0) ... Connection reset by peer`），当时只能电脑侧拉好再推。
-> * 2026-09-22 复测（同一条命令、同一台设备、同一个 busybox）：`github.com` / `codeload.github.com`
->   / `raw.githubusercontent.com` / `api.github.com` **都通了**（分别取到 146351 / 146351 / 24789 /
->   6344 字节），Release 附件也下得动（整卷 235001052 字节）。
-> * 所以要分成两件事说（2026-09-22 同一天两边都量了多次）：
->   * **仓库 tarball（`codeload.github.com`）很稳** —— 连试 3 次全成功（每次 153,364 字节）。
->     纯手机自举靠的就是它，这条路可靠。
->   * **Release 附件不稳** —— 走 `objects.githubusercontent.com`，同一 URL 有时成
->     （482 B 与 235 MB 都下过），有时连续 5 次 `Connection reset by peer`。
->     手机自己下镜像属于「能下就下，下不动重试或换电脑」。
-> * 所以现在的说法是：**两条路都行**。电脑侧更省事也更稳（不用在手机上装终端、
->   不用跟 CDN 运气），手机侧自举适合「手边只有手机」的情况。
-> * 清华镜像（rootfs 的来源）一直都能连。
+> **为什么推荐在电脑侧准备？** 因为**镜像那 2.2 GB** 这一环，手机侧看运气：
+> * **仓库 tarball（`codeload.github.com`）很稳** —— 连试 3 次全成功（每次 153,364 字节）。
+>   纯手机自举靠它，这条路可靠。
+> * **Release 附件不稳，而且是间歇性的**（2026-09-22 同一天量到两边极端）：
+>   * 18:52~18:56：同一份脚本、同一条 URL，`part-aaa` **5 次全部** `download timed out`，
+>     一个字节都没传（用 chroot 的 curl 探到 `Failed to connect to github.com port 443 after 15001 ms`）；
+>   * 19:00 之后：同样的 URL，**30 秒下了 337 MB**（≈11 MB/s），3 分钟下完整卷。
+>   * 注意坏的是 **`github.com` 那一跳**，CDN（`185.199.x.x`）那一跳是通的。
+> * 所以手机侧自举是「能下就下」：`fetch-image.sh` 会断点续传 + 重试，`--tries 0` 一直磨。
+>   想稳就走电脑侧。清华镜像（`--from-source` 铺 rootfs 的来源）一直都能连。
 
 ### 分步部署（想自己控制的用这个）
 
@@ -272,54 +303,69 @@ adb shell "su -c 'sh $D/install/deploy.sh'"
 > **rootfs 能从清华镜像下**（HTTP/HTTPS 都行），**仓库不能从 GitHub 下**。
 > 想完全在手机上自举，先把仓库打包推上去再用 `--repo-tar`。
 
-### 预制镜像（装第二台、或宝塔哪天没这个版本了）
+### 预制镜像（**唯一交付路径**）
 
-从零装要碰一堆宝塔的端点（安装器 / panel6.zip / pyenv bundle / 组件脚本 / 组件源码），
-任何一环变了或没了，从零装就断。所以：**装好一次，冻成镜像，以后重装 = 解包。**
+从源装要碰一堆宝塔的端点（安装器 / panel6.zip / pyenv bundle / 组件脚本 / 组件源码），
+任何一环变了或没了、或者面板换版本了，从源装就断。所以：**装好一次，冻成镜像，以后重装 = 解包。**
+
+三种拿法，按推荐顺序：
+
+**① 电脑侧一键（最稳）** —— 电脑下 2.2 GB（网络好），下完自动推进手机：
+
+```powershell
+.\deploy.ps1                       # Windows
+./deploy-linux.sh                  # Linux / macOS
+```
+
+它会下到 `_dist/image/`（已在 `.gitignore` 里）缓存住，**校验通过就不重复下**，
+然后推到手机 `/data/local/tmp/qyt-image`，并在手机上核一遍 sha256 才算完。
+
+**② 纯手机（手机自己下）** —— 断点续传 + 逐卷校验 + 重试：
 
 ```sh
-# 打镜像（设备上跑，环境已装好；会自动拒绝在"还有挂载"或"打了补丁"的状态下打包）
-sh tools/make_image.sh --out /data/qyt_image
-# 产出：qyt-image.part-aaa / -aab / …（按 1900MB 分卷，GitHub 单附件上限 2GiB）+ SHA256SUMS.txt
+su -c 'sh /data/local/tmp/qyt-repo/install/fetch-image.sh'
+# 直连 GitHub 撞上坏窗口就让它自己磨（可以挂着去睡觉）：
+su -c 'sh /data/local/tmp/qyt-repo/install/fetch-image.sh --tries 0'
+```
 
-# 用镜像装（设备上跑；目录里放分卷）
-sh install/deploy.sh --from-image /data/qyt_image
+**③ 从一台已经装好的设备直接拿（完全不经过网络）**：
+
+```sh
+# 在已经装好的那台上
+sh tools/make_image.sh --out /data/qyt_image
+# 在电脑上
+adb -s <旧机器> pull /data/qyt_image ./qyt_image
+adb -s <新机器> push ./qyt_image/. /data/local/tmp/qyt-image/
+```
+
+> 哈希清单在 `install/image.lock`（分卷 + 整包都记着）。取件脚本和 `deploy.sh` 都拿它核对：
+> **对不上就拒绝解包**，不会铺出一个坏环境。换镜像时要把新哈希追加进去（流程写在文件头部）。
+
+拿到分卷之后（手机上）：
+
+```sh
+D=/data/local/tmp/qyt-repo
+su -c "sh $D/install/prepare-rootfs.sh --clean"          # 目标非空才需要；别直接 rm -rf
+su -c "sh $D/install/deploy.sh --from-image /data/local/tmp/qyt-image"
 ```
 
 * 跳过 **dnf + 全部源码编译**，从 ~2 小时降到 **~10 分钟**，且不连宝塔的服务器
 * 镜像里存的是**未打补丁的原版**，破解补丁在部署时打（补丁要跟面板版本走，冻进去就没法单独更新；
   而且只有对原版打，`moli_patch/backup_*/` 里才是真原版，回滚点才成立）
-* **端口 / 安全入口 / 用户名 / 密码会在部署时重新随机** —— 镜像里烘的是打包那台机器的值，
+* **端口 / 安全入口 / 用户名 / 密码 / sshd 主机密钥会在部署时重新随机** —— 镜像里烘的是打包那台机器的值，
   不重新随机，所有用同一镜像的人就完全一样
-* 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**）
+* 前置：目标 `/data/openeuler` 必须为空；非空时先 `sh install/prepare-rootfs.sh --clean`（**别直接 `rm -rf`**，
+  带着挂载删会连宿主的真 `/dev` 一起删掉，实测黑屏过两次）
 
-**现成的镜像在哪**：模块 zip 和预制镜像分开发 —— 模块 zip 在最新 Release（**v1.2.7**），
-**预制镜像在 v1.2.6 的 Release** 里（v1.2.7 只改了部署脚本与文档，环境一个字节没变，
-所以没重发那 2.2 GB）。下面命令里的 `V=v1.2.6` 就是「镜像所在的 Release」：
+**现成的镜像在哪**：模块 zip 和预制镜像**分开发** —— 模块 zip 在最新 Release（**v1.2.7**），
+**预制镜像在 v1.2.6 的 Release** 里（v1.2.7 只改了部署脚本与文档，环境一个字节没变，所以没重发那 2.2 GB）。
+`install/image.lock` 里记的 `tag` 就是「镜像所在的 Release」，`fetch-image.sh` / `deploy.ps1` / `deploy-linux.sh`
+都按它拼下载地址，不用你手填。
 
- `qyt-image.part-*` 分卷和
-`SHA256SUMS.txt`（分卷按 1900 MB 切开，GitHub 单附件上限 2 GiB）。
-全部下到**同一个目录**再喂给 `--from-image`（分卷名要按 `part-aaa / -aab / …` 顺序排好，
-`cat qyt-image.part-*` 是按名字拼的）：
-
-```powershell
-# 1) 电脑上下载全部分卷 + 校验和
-& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'qyt-image*' --dir .\qyt_image
-& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'SHA256SUMS.txt' --dir .\qyt_image
-& gh release download v1.2.6 --repo moliapiyyds/qiyuntai-btpanel --pattern 'IMAGE-MANIFEST.txt' --dir .\qyt_image
-
-# 2) 推到手机（几 GB 走 USB，耐心等；同样推 /data/local/tmp，不用 /sdcard）
-adb shell "mkdir -p /data/local/tmp/qyt_image"
-adb push .\qyt_image\. /data/local/tmp/qyt_image/
-
-# 3) 手机上：先空出 /data/openeuler，再从镜像铺
-D=/data/local/tmp/qyt-repo
-adb shell "su -c 'sh $D/install/prepare-rootfs.sh --clean'"
-adb shell "su -c 'sh $D/install/deploy.sh --from-image /data/local/tmp/qyt_image'"
-```
-
-`--from-image` 会自己 `cat` 分卷 → 重算 sha256 与 `SHA256SUMS.txt` 比对 →
-**对不上就直接停下、不铺环境**。（不想用 `gh` 就浏览器点 Release 附件下载，效果一样。）
+> 手机直连 GitHub 下 2.2 GB 会碰到 `github.com` 那一跳**间歇性连不上**
+> （实测 `curl: (28) Failed to connect to github.com port 443 after 15001 ms`，
+> 同一时刻 CDN 那一跳 `185.199.x.x` 是通的）。所以取件脚本是「重试 + 断点续传 +
+> 失败**保留半截文件**」，`--tries 0` 就是无限磨。真嫌慢就走电脑那条。
 
 ### 只想装 / 更新模块（环境已经好了）
 
@@ -413,9 +459,9 @@ adb shell "su -c 'sh /data/adb/modules/qiyuntai_btpanel/uninstall.sh --purge'"
 ## 六、仓库结构
 
 ```
-deploy.ps1               Windows 侧一键部署（找 adb → 推 install/module/tools → 手机上装）
-deploy-linux.sh          Linux / macOS 侧一键部署（与 deploy.ps1 等价：--check/--push-only/--no-reboot/--adb/--dest）
-install/deploy.sh        手机侧一键部署（自举：拉仓库 → 铺 rootfs → 装全套 → 重启）
+deploy.ps1               Windows 侧一键部署（找 adb → 推仓库 → 下+推镜像分卷 → 手机上装）
+deploy-linux.sh          Linux / macOS 侧一键部署（与 deploy.ps1 等价：--check/--push-only/--no-reboot/--adb/--dest/--image-dir/--image-url）
+install/deploy.sh        手机侧一键部署总入口（默认走预制镜像；--from-source 才是从源铺）
                          ← 纯手机终端那条路最后就调它（见首页「纯手机终端」）
 
 module/                  KernelSU 模块（刷这个）
@@ -427,9 +473,12 @@ module/                  KernelSU 模块（刷这个）
   README.md               模块使用说明
 
 install/                 设备上执行的部署脚本
-  deploy.sh               一键部署总入口（--check / --repo-only / --from-image / --no-reboot 等）
-  prepare-rootfs.sh       铺 openEuler rootfs（按 manifest.json 顺序叠层）
-  qiyuntai-install.sh     一键装：rootfs → 挂载 → 依赖 → 面板 → 凭据 → 组件 → 插件 → 基线包对齐 → 补丁 → 模块
+  deploy.sh               一键部署总入口（默认从预制镜像铺；--check / --repo-only /
+                          --from-image / --image-url / --no-fetch / --no-reboot 等）
+  fetch-image.sh          取预制镜像分卷（断点续传 + 逐卷 sha256 + 重试；--tries 0 = 一直试）
+  image.lock              预制镜像的哈希清单（分卷 + 整包），取件与解包前都按它核对
+  prepare-rootfs.sh       铺 openEuler rootfs（按 manifest.json 顺序叠层）；--clean 清环境
+  qiyuntai-install.sh     分步安装：rootfs → 挂载 → 依赖 → 面板 → 凭据 → 组件 → 插件 → 基线包对齐 → 补丁 → 模块
   chroot-compat-layer.sh  systemctl/service/start-stop-daemon/iptables-legacy 兼容层
   android-network-fix.sh  paranoid-network 的 inet 组修正
   crond.initd             chroot 没有 systemd、宝塔也不给这三个，缺了就起不来
@@ -438,7 +487,8 @@ install/                 设备上执行的部署脚本
   sshd_config_moli        sshd 兜底通道（:22）的配置，面板/openEuler 都不带，基线里那台是手工装的
   lib-shim.sh            替换面板原版 lib.sh 的最小依赖兜底（避免重复编译 openssl/mcrypt）
   bt-panel-install.exp   驱动宝塔官方安装器：分配 pty、按「提示内容」作答（不依赖提问顺序）
-  installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单
+                         —— 只在 --from-source 重建环境时用得到
+  installer.lock         已人工核验过的 install_panel.sh 的 sha256 白名单（同上）
   baseline-packages.txt  标准环境的 548 个 rpm 包清单（parity 步骤按它对齐，只比包名）
                          sha256 4b3c870ad51d957f3c357aa97a96d921fde358264b77f9f2319d591eb2890f31
                          与删除前那台的 `rpm -qa` 输出逐字节一致（20899 字节）
